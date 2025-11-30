@@ -1,0 +1,5 @@
+{
+  "name": "CosmoQuantAI",
+  "description": "A hybrid platform that functions both as a portfolio for a freelance trading algorithm developer and as a 'Freemium' SaaS tool for traders. Build, backtest, and deploy your trading strategies with professional-grade tools.",
+  "requestFramePermissions": []
+}

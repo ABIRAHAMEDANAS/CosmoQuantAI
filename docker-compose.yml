@@ -1,0 +1,77 @@
+services:
+  # 1. Backend Service (FastAPI)
+  backend:
+    build: ./backend
+    container_name: cosmoquant_backend
+    command: bash -c "bash prestart.sh && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/cosmoquant_db
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - db
+      - redis
+    env_file:
+      - .env
+
+  # 2. Celery Worker (Background Tasks) - NEW
+  worker:
+    build: ./backend
+    container_name: cosmoquant_worker
+    command: celery -A app.celery_app worker --loglevel=info
+    volumes:
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/cosmoquant_db
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - db
+      - redis
+      - backend
+
+  # 3. Redis Service - NEW
+  redis:
+    image: redis:7-alpine
+    container_name: cosmoquant_redis
+    ports:
+      - "6379:6379"
+
+  # 4. Frontend Service
+  frontend:
+    build: ./frontend
+    container_name: cosmoquant_frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      - VITE_BACKEND_URL=http://backend:8000
+
+  # 5. Database Service
+  db:
+    image: postgres:17-alpine
+    container_name: cosmoquant_db
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: cosmoquant_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

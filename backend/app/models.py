@@ -1,0 +1,134 @@
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Float, DateTime, UniqueConstraint, Index
+from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.sql import func # created_at এর জন্য এটি লাগবে
+from .database import Base
+
+# 1. User Model
+class User(Base):
+    __tablename__ = "users"
+    __table_args__ = {'extend_existing': True} # This fixes the redefinition error
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True)
+    full_name = Column(String)
+    hashed_password = Column(String)
+    is_active = Column(Boolean, default=True)
+    
+    # মিসিং ফিল্ডস যোগ করা হলো:
+    is_pro = Column(Boolean, default=False) # ডিফল্ট false (ফ্রি ইউজার)
+    created_at = Column(DateTime(timezone=True), server_default=func.now()) # একাউন্ট তৈরির সময়
+
+    # Relationships
+    api_keys = relationship("ApiKey", back_populates="owner")
+
+# 2. API Keys Model
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+    __table_args__ = {'extend_existing': True}
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String)  # e.g., Binance, KuCoin
+    api_key = Column(String)   # Public Key
+    secret_key = Column(String) # Encrypted Secret Key
+    is_enabled = Column(Boolean, default=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+
+    owner = relationship("User", back_populates="api_keys")
+
+# 3. Strategy Templates Model
+class StrategyTemplate(Base):
+    __tablename__ = "strategy_templates"
+    __table_args__ = {'extend_existing': True}
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True)
+    description = Column(String)
+    strategy_type = Column(String) 
+    tags = Column(JSON)
+    params = Column(JSON)
+
+# 4. Market Data Model
+class MarketData(Base):
+    __tablename__ = "market_data"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String, index=True)   # e.g., "binance"
+    symbol = Column(String, index=True)     # e.g., "BTC/USDT"
+    timeframe = Column(String, index=True)  # e.g., "1h", "4h"
+    timestamp = Column(DateTime, index=True) # Candle Time
+    
+    open = Column(Float)
+    high = Column(Float)
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Float, DateTime, UniqueConstraint, Index
+from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.sql import func # created_at এর জন্য এটি লাগবে
+from .database import Base
+
+# 1. User Model
+class User(Base):
+    __tablename__ = "users"
+    __table_args__ = {'extend_existing': True} # This fixes the redefinition error
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True)
+    full_name = Column(String)
+    hashed_password = Column(String)
+    is_active = Column(Boolean, default=True)
+    
+    # মিসিং ফিল্ডস যোগ করা হলো:
+    is_pro = Column(Boolean, default=False) # ডিফল্ট false (ফ্রি ইউজার)
+    created_at = Column(DateTime(timezone=True), server_default=func.now()) # একাউন্ট তৈরির সময়
+
+    # Relationships
+    api_keys = relationship("ApiKey", back_populates="owner")
+
+# 2. API Keys Model
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+    __table_args__ = {'extend_existing': True}
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String)  # e.g., Binance, KuCoin
+    api_key = Column(String)   # Public Key
+    secret_key = Column(String) # Encrypted Secret Key
+    is_enabled = Column(Boolean, default=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+
+    owner = relationship("User", back_populates="api_keys")
+
+# 3. Strategy Templates Model
+class StrategyTemplate(Base):
+    __tablename__ = "strategy_templates"
+    __table_args__ = {'extend_existing': True}
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True)
+    description = Column(String)
+    strategy_type = Column(String) 
+    tags = Column(JSON)
+    params = Column(JSON)
+
+# 4. Market Data Model
+class MarketData(Base):
+    __tablename__ = "market_data"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String, index=True)   # e.g., "binance"
+    symbol = Column(String, index=True)     # e.g., "BTC/USDT"
+    timeframe = Column(String, index=True)  # e.g., "1h", "4h"
+    timestamp = Column(DateTime, index=True) # Candle Time
+    
+    open = Column(Float)
+    high = Column(Float)
+    low = Column(Float)
+    close = Column(Float)
+    volume = Column(Float)
+
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint('exchange', 'symbol', 'timeframe', 'timestamp', name='unique_candle'),
+        Index('idx_market_data_lookup', 'symbol', 'timeframe', 'timestamp'),
+        {'extend_existing': True}
+    )
