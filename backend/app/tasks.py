@@ -4,6 +4,32 @@ from .services.backtest_engine import BacktestEngine
 import sys
 from . import utils # ✅ utils ইম্পোর্ট করুন
 
+# ✅ সুন্দর করে প্রিন্ট করার ফাংশন
+def print_pretty_result(result):
+    if result.get("status") != "success":
+        print(f"❌ Backtest Failed: {result.get('message')}")
+        return
+
+    print("\n" + "="*50)
+    print(f"🚀 BACKTEST RESULTS: {result['symbol']} ({result['strategy']})")
+    print("="*50)
+    print(f"💰 Initial Cash  : ${result['initial_cash']:,.2f}")
+    print(f"🏁 Final Value   : ${result['final_value']:,.2f}")
+    
+    profit = result['profit_percent']
+    color = "\033[92m" if profit >= 0 else "\033[91m" # Green or Red color code
+    reset = "\033[0m"
+    
+    print(f"📈 Profit/Loss   : {color}{profit}%{reset}")
+    print(f"🔄 Total Trades  : {result['total_trades']}")
+    
+    metrics = result.get('advanced_metrics', {})
+    print("-" * 30)
+    print(f"📊 Win Rate      : {metrics.get('win_rate', 0)}%")
+    print(f"📉 Max Drawdown  : {metrics.get('max_drawdown', 0)}%")
+    print(f"⚖️ Sharpe Ratio  : {metrics.get('sharpe', 0)}")
+    print("="*50 + "\n")
+
 # টাস্কটি ব্যাকগ্রাউন্ডে রান হবে
 @celery_app.task(bind=True)
 def run_backtest_task(self, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, custom_data_file: str = None):
@@ -11,6 +37,22 @@ def run_backtest_task(self, symbol: str, timeframe: str, strategy_name: str, ini
     db = SessionLocal()
     engine = BacktestEngine()
     
+    # ✅ প্রগ্রেস হ্যান্ডলার
+    last_percent = -1
+    def on_progress(percent):
+        nonlocal last_percent
+        # বারবার একই পার্সেন্ট যাতে আপডেট না করে এবং লগ জ্যাম না হয়
+        if percent != last_percent:
+            last_percent = percent
+            # Celery State Update
+            self.update_state(
+                state='PROGRESS',
+                meta={'percent': percent, 'status': 'Running Strategy...'}
+            )
+            # প্রতি ১০% পর পর কনসোলে লগ দেখাবে (অপশনাল)
+            if percent % 10 == 0:
+                print(f"⏳ Backtest Progress: {percent}%", flush=True)
+
     try:
         # ব্যাকটেস্ট ইঞ্জিন কল করা
         result = engine.run(
@@ -22,8 +64,13 @@ def run_backtest_task(self, symbol: str, timeframe: str, strategy_name: str, ini
             params=params,
             start_date=start_date,
             end_date=end_date,
-            custom_data_file=custom_data_file
+            custom_data_file=custom_data_file,
+            progress_callback=on_progress # ✅ কলব্যাক পাস করা হলো
         )
+        
+        # ✅ রেজাল্ট সুন্দর করে প্রিন্ট করা
+        print_pretty_result(result)
+        
         return result
         
     except Exception as e:

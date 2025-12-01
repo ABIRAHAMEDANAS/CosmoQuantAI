@@ -693,7 +693,9 @@ const Backtester: React.FC = () => {
                     const statusRes = await getBacktestStatus(taskId);
 
                     if (statusRes.status === 'Processing') {
-                        setProgress(statusRes.percent || 50);
+                        // ✅ এখানে পার্সেন্ট সেট করা হচ্ছে
+                        // statusRes.percent ব্যাকএন্ড থেকে আসছে (0-100)
+                        setProgress(statusRes.percent || 0);
                     } else if (statusRes.status === 'Completed') {
                         clearInterval(interval);
                         setBacktestResult(statusRes.result); // রেজাল্ট সেট করা
@@ -1064,6 +1066,27 @@ const Backtester: React.FC = () => {
                             </Button>
                         </div>
                     </Card>
+
+                    {/* SINGLE BACKTEST PROGRESS */}
+                    {isRunning && (
+                        <Card className="mt-6 border border-blue-500/20 bg-blue-500/5 animate-fade-in">
+                            <div className="flex flex-col justify-center items-center py-12">
+                                {/* Circular Loader */}
+                                <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+
+                                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Running Strategy...</h2>
+                                <p className="text-blue-500 font-mono text-lg mt-2">{progress}% Completed</p>
+
+                                {/* Linear Progress */}
+                                <div className="w-64 h-2 bg-gray-200 dark:bg-gray-700 rounded-full mt-4 overflow-hidden">
+                                    <div
+                                        className="h-full bg-blue-500 transition-all duration-300 ease-out"
+                                        style={{ width: `${progress}%` }}
+                                    ></div>
+                                </div>
+                            </div>
+                        </Card>
+                    )}
 
                     {/* RESULTS SECTION */}
                     {isOptimizing && (

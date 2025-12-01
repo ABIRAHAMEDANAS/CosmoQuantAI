@@ -19,6 +19,23 @@ qs.extend_pandas()
 
 market_service = MarketService()
 
+# ✅ 1. Progress Observer
+class ProgressObserver(bt.Observer):
+    lines = ('progress',)
+    params = (
+        ('total_len', 0),
+        ('callback', None),
+    )
+
+    def next(self):
+        current_idx = len(self)
+        total = self.params.total_len
+
+        if total > 0 and self.params.callback:
+            percent = int((current_idx / total) * 100)
+            if percent % 1 == 0: 
+                self.params.callback(percent)
+
 class FractionalPercentSizer(bt.Sizer):
     params = (
         ('percents', 90),
@@ -31,7 +48,8 @@ class FractionalPercentSizer(bt.Sizer):
         return position.size
 
 class BacktestEngine:
-    def run(self, db: Session, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, custom_data_file: str = None):
+    # ✅ 2. Updated run method with progress_callback
+    def run(self, db: Session, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, custom_data_file: str = None, progress_callback=None):
         resample_compression = 1
         base_timeframe = timeframe
         df = None
@@ -113,6 +131,13 @@ class BacktestEngine:
         else:
             cerebro.adddata(data_feed)
 
+        # ✅ 3. Add Progress Observer
+        if progress_callback:
+            total_candles = len(df)
+            if resample_compression > 1:
+                total_candles = total_candles // resample_compression
+            cerebro.addobserver(ProgressObserver, total_len=total_candles, callback=progress_callback)
+
         # Strategy Loading
         strategy_class = self._load_strategy_class(strategy_name)
         if not strategy_class:
@@ -137,7 +162,7 @@ class BacktestEngine:
         first_strat = results[0]
         end_value = cerebro.broker.getvalue()
 
-        # Metrics Calculation (Same as before)
+        # Metrics Calculation
         qs_metrics = self._calculate_metrics(first_strat, start_value, end_value)
         
         # Trade Log & Chart Data
@@ -170,7 +195,7 @@ class BacktestEngine:
         # 1. Fetch Data
         candles = market_service.get_candles_from_db(db, symbol, timeframe, start_date, end_date)
         
-        # 🔴 Change: If data is missing, automatically download it
+        # If data is missing, automatically download it
         if not candles or len(candles) < 20:
             print(f"Data missing for {symbol} {timeframe}. Auto-syncing from Exchange...")
             if progress_callback: progress_callback(0, 100) # Notify user
@@ -268,23 +293,22 @@ class BacktestEngine:
         
         param_keys = list(param_ranges.keys())
         
-        # ১. ইনিশিয়াল পপুলেশন তৈরি
+        # 1. Initial Population
         population = []
         for _ in range(pop_size):
             individual = {k: random.choice(v) for k, v in param_ranges.items()}
             population.append(individual)
 
         best_results = []
-        history_cache = {} # একই প্যারামিটার যাতে বারবার টেস্ট না হয়
+        history_cache = {} 
 
         for gen in range(generations):
             if abort_callback and abort_callback(): break
             
             evaluated_pop = []
             
-            # ২. ফিটনেস ইভালুয়েশন (ব্যাকটেস্ট রান করা)
+            # 2. Fitness Evaluation
             for i, individual in enumerate(population):
-                # ক্যাশ চেক করা
                 param_signature = json.dumps(individual, sort_keys=True)
                 
                 if param_signature in history_cache:
@@ -296,36 +320,35 @@ class BacktestEngine:
                 
                 evaluated_pop.append(metrics)
                 
-                # প্রগ্রেস আপডেট
+                # Progress Update
                 current_step = (gen * pop_size) + (i + 1)
                 total_steps = generations * pop_size
                 if progress_callback: progress_callback(current_step, total_steps)
 
-            # ৩. সর্টিং (Sharpe Ratio বা Profit এর ভিত্তিতে)
-            # এখানে আমরা Profit Percent কে প্রাধান্য দিচ্ছি, আপনি চাইলে Sharpe Ratio দিতে পারেন
+            # 3. Sorting
             evaluated_pop.sort(key=lambda x: x['profitPercent'], reverse=True)
             
-            # সেরা ১০টি রেজাল্ট গ্লোবাল লিস্টে সেভ রাখা
+            # Save best 5
             best_results.extend(evaluated_pop[:5]) 
             
-            # ৪. সিলেকশন (Elitism): সেরা ২০% পরের জেনারেশনে সরাসরি যাবে
+            # 4. Selection (Elitism)
             elite_count = int(pop_size * 0.2)
             next_generation = [item['params'] for item in evaluated_pop[:elite_count]]
             
-            # ৫. Crossover এবং Mutation
+            # 5. Crossover and Mutation
             while len(next_generation) < pop_size:
                 parent1 = random.choice(evaluated_pop[:int(pop_size/2)])['params']
                 parent2 = random.choice(evaluated_pop[:int(pop_size/2)])['params']
                 
                 child = parent1.copy()
                 
-                # Crossover (Mix genes)
+                # Crossover
                 for k in param_keys:
                     if random.random() > 0.5:
                         child[k] = parent2[k]
                 
-                # Mutation (Small chance to change a value)
-                if random.random() < 0.2: # ২০% মিউটেশন রেট
+                # Mutation
+                if random.random() < 0.2: 
                     mutate_key = random.choice(param_keys)
                     child[mutate_key] = random.choice(param_ranges[mutate_key])
                 
@@ -333,7 +356,7 @@ class BacktestEngine:
             
             population = next_generation
 
-        # ডুপ্লিকেট রিমুভ করে সেরা রেজাল্ট রিটার্ন করা
+        # Remove duplicates
         unique_results = {json.dumps(r['params'], sort_keys=True): r for r in best_results}
         return list(unique_results.values())
 
