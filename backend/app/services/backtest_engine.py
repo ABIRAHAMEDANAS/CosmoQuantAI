@@ -12,6 +12,7 @@ import itertools
 import os
 import importlib.util
 import sys
+import asyncio
 
 # QuantStats setup
 qs.extend_pandas()
@@ -168,8 +169,31 @@ class BacktestEngine:
         
         # 1. Fetch Data
         candles = market_service.get_candles_from_db(db, symbol, timeframe, start_date, end_date)
+        
+        # 🔴 Change: If data is missing, automatically download it
         if not candles or len(candles) < 20:
-            return {"error": "Insufficient Data"}
+            print(f"Data missing for {symbol} {timeframe}. Auto-syncing from Exchange...")
+            if progress_callback: progress_callback(0, 100) # Notify user
+
+            try:
+                # Use asyncio.run to call async function
+                asyncio.run(market_service.fetch_and_store_candles(
+                    db=db, 
+                    symbol=symbol, 
+                    timeframe=timeframe, 
+                    start_date=start_date, 
+                    end_date=end_date,
+                    limit=1000 # Or increase as needed
+                ))
+                
+                # Fetch data again after download
+                candles = market_service.get_candles_from_db(db, symbol, timeframe, start_date, end_date)
+                
+            except Exception as e:
+                print(f"Auto-sync failed: {e}")
+
+        if not candles or len(candles) < 20:
+            return {"error": f"Insufficient Data. Could not fetch data for {symbol}."}
 
         df = pd.DataFrame([{
             'datetime': c.timestamp,
