@@ -2,7 +2,7 @@ from .celery_app import celery_app
 from .database import SessionLocal
 from .services.backtest_engine import BacktestEngine
 import sys
-from . import utils # ✅ utils ইম্পোর্ট করুন
+from . import utils 
 
 # ✅ সুন্দর করে প্রিন্ট করার ফাংশন
 def print_pretty_result(result):
@@ -17,7 +17,7 @@ def print_pretty_result(result):
     print(f"🏁 Final Value   : ${result['final_value']:,.2f}")
     
     profit = result['profit_percent']
-    color = "\033[92m" if profit >= 0 else "\033[91m" # Green or Red color code
+    color = "\033[92m" if profit >= 0 else "\033[91m" 
     reset = "\033[0m"
     
     print(f"📈 Profit/Loss   : {color}{profit}%{reset}")
@@ -33,28 +33,22 @@ def print_pretty_result(result):
 # টাস্কটি ব্যাকগ্রাউন্ডে রান হবে
 @celery_app.task(bind=True)
 def run_backtest_task(self, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, custom_data_file: str = None):
-    # প্রতিটি টাস্কের জন্য নতুন ডিবি সেশন খুলতে হবে
     db = SessionLocal()
     engine = BacktestEngine()
     
-    # ✅ প্রগ্রেস হ্যান্ডলার
     last_percent = -1
     def on_progress(percent):
         nonlocal last_percent
-        # বারবার একই পার্সেন্ট যাতে আপডেট না করে এবং লগ জ্যাম না হয়
         if percent != last_percent:
             last_percent = percent
-            # Celery State Update
             self.update_state(
                 state='PROGRESS',
                 meta={'percent': percent, 'status': 'Running Strategy...'}
             )
-            # প্রতি ১০% পর পর কনসোলে লগ দেখাবে (অপশনাল)
             if percent % 10 == 0:
                 print(f"⏳ Backtest Progress: {percent}%", flush=True)
 
     try:
-        # ব্যাকটেস্ট ইঞ্জিন কল করা
         result = engine.run(
             db=db,
             symbol=symbol,
@@ -65,16 +59,12 @@ def run_backtest_task(self, symbol: str, timeframe: str, strategy_name: str, ini
             start_date=start_date,
             end_date=end_date,
             custom_data_file=custom_data_file,
-            progress_callback=on_progress # ✅ কলব্যাক পাস করা হলো
+            progress_callback=on_progress 
         )
-        
-        # ✅ রেজাল্ট সুন্দর করে প্রিন্ট করা
         print_pretty_result(result)
-        
         return result
         
     except Exception as e:
-        # এরর হলে সেটি রিটার্ন করা
         return {"status": "error", "message": str(e)}
         
     finally:
@@ -85,25 +75,16 @@ def run_optimization_task(self, symbol: str, timeframe: str, strategy_name: str,
     db = SessionLocal()
     engine = BacktestEngine()
     
-    # ✅ প্রগ্রেস আপডেট এবং টার্মিনালে প্রিন্ট করার ফাংশন
     def on_progress(current, total):
         percent = int((current / total) * 100)
-        
-        # বারের দৈর্ঘ্য (কতটি ক্যারেক্টার হবে)
         bar_length = 30 
         filled_length = int(bar_length * current // total)
-        
-        # বার তৈরি করা: █ ক্যারেক্টার দিয়ে পূর্ণ অংশ, - দিয়ে বাকি অংশ
         bar = '█' * filled_length + '-' * (bar_length - filled_length)
-        
-        # 🖥️ টার্মিনালে সুন্দর আউটপুট
-        # \r ব্যবহার করা হয়নি কারণ Docker লগে এটি সবসময় ঠিকঠাক কাজ করে না, নতুন লাইনই নিরাপদ
         print(f"Optimization: |{bar}| {percent}% Complete ({current}/{total})", flush=True)
 
         if current == total:
-            print() # কাজ শেষ হলে নতুন লাইন
+            print() 
 
-        # ফ্রন্টএন্ডের জন্য স্টেট আপডেট
         self.update_state(
             state='PROGRESS',
             meta={
@@ -114,11 +95,9 @@ def run_optimization_task(self, symbol: str, timeframe: str, strategy_name: str,
             }
         )
 
-    # ✅ নতুন: অ্যাবর্ট চেক ফাংশন
     def check_abort():
         try:
             r = utils.get_redis_client()
-            # যদি Redis এ এই টাস্ক আইডির ফ্ল্যাগ থাকে, তবে True রিটার্ন করো
             if r.exists(f"abort_task:{self.request.id}"):
                 return True
         except Exception:
@@ -139,10 +118,9 @@ def run_optimization_task(self, symbol: str, timeframe: str, strategy_name: str,
             population_size=population_size,
             generations=generations,
             progress_callback=on_progress,
-            abort_callback=check_abort # ✅ কলব্যাক পাঠানো হলো
+            abort_callback=check_abort 
         )
         
-        # কাজ শেষে বা মাঝপথে থামলে ফ্ল্যাগ ক্লিনআপ
         try:
             r = utils.get_redis_client()
             r.delete(f"abort_task:{self.request.id}")
@@ -165,7 +143,7 @@ from datetime import datetime
 from .celery_app import celery_app
 from celery import current_task
 from tqdm import tqdm
-from .utils import get_redis_client  # ✅ Redis ক্লায়েন্ট ইম্পোর্ট
+from .utils import get_redis_client
 
 DATA_FEED_DIR = "app/data_feeds"
 os.makedirs(DATA_FEED_DIR, exist_ok=True)
@@ -187,10 +165,8 @@ def get_last_timestamp(file_path):
             if not last_line: return None
             data = last_line.split(',')
             
-            # Trade data (timestamp at index 1)
             if len(data) > 1 and data[1].isdigit():
                 return int(data[1])
-            # Candle data (datetime at index 0)
             if len(data) > 0:
                  try:
                     dt_obj = datetime.strptime(data[0], "%Y-%m-%d %H:%M:%S")
@@ -200,27 +176,49 @@ def get_last_timestamp(file_path):
         return None
     return None
 
+# ✅ Helper to safe parse date
+def safe_parse_date(exchange, date_str):
+    if not date_str: return None
+    # 1. Try ccxt parse8601
+    ts = exchange.parse8601(date_str)
+    if ts is not None:
+        return ts
+    
+    # 2. Try manual parsing if ccxt fails (e.g. "2024-01-01 00:00:00")
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+        return int(dt.timestamp() * 1000)
+    except:
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            return int(dt.timestamp() * 1000)
+        except:
+            return None
+
 # --- Task 1: Download Candles (OHLCV) ---
 @celery_app.task(bind=True)
 def download_candles_task(self, exchange_id, symbol, timeframe, start_date, end_date=None):
     try:
-        # ১. এক্সচেঞ্জ ভেরিফিকেশন
         if exchange_id not in ccxt.exchanges:
             return {"status": "failed", "error": f"Exchange {exchange_id} not found"}
             
         exchange_class = getattr(ccxt, exchange_id)
         exchange = exchange_class({'enableRateLimit': True})
-        redis_client = get_redis_client()  # ✅ Redis কানেকশন
+        redis_client = get_redis_client()
         
         safe_symbol = symbol.replace('/', '-')
         filename = f"{exchange_id}_{safe_symbol}_{timeframe}.csv"
         save_path = f"{DATA_FEED_DIR}/{filename}"
         
-        # ২. সময় ক্যালকুলেশন
-        since = exchange.parse8601(start_date)
+        # ✅ ২. সময় ক্যালকুলেশন (FIXED)
+        since = safe_parse_date(exchange, start_date)
+        if since is None:
+            return {"status": "failed", "error": f"Invalid start_date format: {start_date}"}
         
         if end_date:
-            end_ts = exchange.parse8601(end_date)
+            end_ts = safe_parse_date(exchange, end_date)
+            if end_ts is None:
+                return {"status": "failed", "error": f"Invalid end_date format: {end_date}"}
         else:
             end_ts = exchange.milliseconds()
 
@@ -247,7 +245,6 @@ def download_candles_task(self, exchange_id, symbol, timeframe, start_date, end_
         
         print(f"🚀 Starting download: {symbol} ({timeframe}) | Target: {end_date or 'NOW'}")
 
-        # ৪. ডাউনলোড লুপ
         with open(save_path, mode, newline='') as f:
             writer = csv.writer(f)
             if mode == 'w' or os.path.getsize(save_path) == 0:
@@ -255,7 +252,6 @@ def download_candles_task(self, exchange_id, symbol, timeframe, start_date, end_
             
             with tqdm(total=total_duration, unit="ms", desc=f"📥 {symbol}", ncols=80) as pbar:
                 while True:
-                    # ✅ ফিক্স: Redis চেক করে Stop করা
                     if self.request.id and redis_client.exists(f"abort_task:{self.request.id}"):
                         print(f"🛑 Download stopped for {symbol}")
                         return {"status": "stopped", "message": "Stopped by user"}
@@ -277,8 +273,6 @@ def download_candles_task(self, exchange_id, symbol, timeframe, start_date, end_
                             f.flush()
                         
                         current_ts = candles[-1][0]
-                        
-                        # আপডেট
                         step = current_ts - since
                         pbar.update(step)
                         since = current_ts + 1
@@ -306,15 +300,19 @@ def download_trades_task(self, exchange_id, symbol, start_date, end_date=None):
         
         exchange_class = getattr(ccxt, exchange_id)
         exchange = exchange_class({'enableRateLimit': True})
-        redis_client = get_redis_client()  # ✅ Redis কানেকশন
+        redis_client = get_redis_client() 
         
         safe_symbol = symbol.replace('/', '-')
         filename = f"trades_{exchange_id}_{safe_symbol}.csv"
         save_path = f"{DATA_FEED_DIR}/{filename}"
         
-        since = exchange.parse8601(start_date)
+        # ✅ FIX: Safe parse
+        since = safe_parse_date(exchange, start_date)
+        if since is None:
+            return {"status": "failed", "error": f"Invalid start_date format: {start_date}"}
+
         if end_date:
-            end_ts = exchange.parse8601(end_date)
+            end_ts = safe_parse_date(exchange, end_date)
         else:
             end_ts = exchange.milliseconds()
 
@@ -340,7 +338,6 @@ def download_trades_task(self, exchange_id, symbol, start_date, end_date=None):
             
             with tqdm(total=total_duration, unit="ms", desc=f"Tick {symbol}", ncols=80) as pbar:
                 while True:
-                    # ✅ ফিক্স: Redis চেক করে Stop করা
                     if self.request.id and redis_client.exists(f"abort_task:{self.request.id}"):
                          return {"status": "stopped", "message": "Stopped by user"}
 

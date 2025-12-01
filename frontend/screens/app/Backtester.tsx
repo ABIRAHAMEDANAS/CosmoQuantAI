@@ -22,7 +22,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import MonthlyReturnsHeatmap from '../../components/ui/MonthlyReturnsHeatmap';
 
-import { Activity, Layers, PlayIcon, CodeIcon, SaveIcon, UploadCloud, Download, X, AlertCircle } from 'lucide-react';
+import { Activity, Layers, PlayIcon, CodeIcon, SaveIcon, UploadCloud, Download, X, AlertCircle, Settings, Info } from 'lucide-react';
 
 // --- Constants ---
 const TIMEFRAME_OPTIONS: Timeframe[] = [
@@ -198,7 +198,9 @@ const Backtester: React.FC = () => {
         setStartDate: setContextStartDate,
         setEndDate: setContextEndDate,
         setParams: setContextParams,
-        singleResult: contextResult
+        singleResult: contextResult,
+        commission, setCommission,
+        slippage, setSlippage
     } = useBacktest();
 
     // --- Tab State (NEW) ---
@@ -287,6 +289,12 @@ const Backtester: React.FC = () => {
         setDownloadProgress(0);
 
         try {
+            if (!dlStartDate) {
+                showToast('Please select a Start Date', 'warning');
+                setIsDownloading(false);
+                return;
+            }
+
             // End Date ফাঁকা থাকলে undefined পাঠাব, যাতে ব্যাকএন্ড "Till Now" ধরে নেয়
             const payload = {
                 exchange: dlExchange,
@@ -648,7 +656,9 @@ const Backtester: React.FC = () => {
                     params: optimizationParams, // Optimization Params
                     method: optimizationMethod === 'gridSearch' ? 'grid' : 'genetic',
                     population_size: gaParams.populationSize,
-                    generations: gaParams.generations
+                    generations: gaParams.generations,
+                    commission: commission,
+                    slippage: slippage
                 };
 
                 const res = await runOptimizationApi(payload as any); // Type assertion if needed, or update interface
@@ -1066,6 +1076,55 @@ const Backtester: React.FC = () => {
                             </div>
                         </div>
 
+                        {/* ✅ Execution Realism UI */}
+                        <div className="mt-6 pt-4 border-t border-brand-border-light dark:border-brand-border-dark">
+                            <div className="flex items-center gap-2 mb-4">
+                                <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                                    Execution Realism (Fees & Slippage)
+                                </h3>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Commission Input */}
+                                <div className="relative">
+                                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                                        Trading Fee (Commission)
+                                    </label>
+                                    <div className="flex items-center">
+                                        <input
+                                            type="number"
+                                            step="0.0001"
+                                            value={commission}
+                                            onChange={(e) => setCommission(parseFloat(e.target.value))}
+                                            className="w-full bg-white dark:bg-brand-dark/50 border border-brand-border-light dark:border-brand-border-dark rounded-l-md p-2 text-sm text-slate-900 dark:text-white focus:ring-brand-primary focus:border-brand-primary"
+                                        />
+                                        <span className="bg-gray-100 dark:bg-gray-800 border border-l-0 border-brand-border-light dark:border-brand-border-dark rounded-r-md px-3 py-2 text-xs text-gray-500">
+                                            {(commission * 100).toFixed(2)}%
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Slippage Input */}
+                                <div className="relative">
+                                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                                        Slippage Model
+                                    </label>
+                                    <div className="flex items-center">
+                                        <input
+                                            type="number"
+                                            step="0.0001"
+                                            value={slippage}
+                                            onChange={(e) => setSlippage(parseFloat(e.target.value))}
+                                            className="w-full bg-white dark:bg-brand-dark/50 border border-brand-border-light dark:border-brand-border-dark rounded-l-md p-2 text-sm text-slate-900 dark:text-white focus:ring-brand-primary focus:border-brand-primary"
+                                        />
+                                        <span className="bg-gray-100 dark:bg-gray-800 border border-l-0 border-brand-border-light dark:border-brand-border-dark rounded-r-md px-3 py-2 text-xs text-gray-500">
+                                            {(slippage * 100).toFixed(2)}%
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         {backtestMode === 'single' ? renderSingleParams() : renderOptimizationParams()}
 
                         <div className="mt-8 pt-6 border-t border-brand-border-light dark:border-brand-border-dark flex items-center gap-4">
@@ -1358,10 +1417,17 @@ const Backtester: React.FC = () => {
                                     </div>
                                 )}
 
+                                {/* ✅ এই অংশটি মিসিং ছিল: Start & End Date Inputs */}
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
                                         <label className="text-xs text-gray-500 mb-1 block">Start Date</label>
-                                        <input type="date" value={dlStartDate} onChange={(e) => setDlStartDate(e.target.value)} disabled={isDownloading} className="w-full p-2 border rounded bg-transparent text-sm" />
+                                        <input
+                                            type="date"
+                                            value={dlStartDate}
+                                            onChange={(e) => setDlStartDate(e.target.value)}
+                                            disabled={isDownloading}
+                                            className="w-full p-2 border rounded bg-transparent text-sm"
+                                        />
                                     </div>
                                     <div>
                                         <label className="text-xs text-gray-500 mb-1 block">End Date (Optional)</label>
@@ -1372,9 +1438,11 @@ const Backtester: React.FC = () => {
                                             disabled={isDownloading}
                                             className="w-full p-2 border rounded bg-transparent text-sm placeholder-gray-400"
                                         />
-                                        {!dlEndDate && <span className="text-[10px] text-brand-primary absolute mt-[-20px] ml-[100px] bg-white px-1">Till Now</span>}
+                                        {/* Till Now ব্যাজ */}
+                                        {!dlEndDate && <span className="text-[10px] text-brand-primary absolute mt-[-28px] right-8 bg-white/80 px-1 rounded pointer-events-none">Till Now</span>}
                                     </div>
                                 </div>
+                                {/* ✅ ডেট ইনপুট অংশের শেষ */}
 
                                 {/* Info Box */}
                                 <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-md flex items-start gap-2">
@@ -1385,43 +1453,43 @@ const Backtester: React.FC = () => {
                                             : "Candle data is faster. Leave End Date empty to download up to the current moment."}
                                     </p>
                                 </div>
+                            </div>
 
-                                {/* Progress Bar */}
-                                {isDownloading && (
-                                    <div className="space-y-2 pt-2 animate-fade-in">
-                                        <div className="flex justify-between text-xs font-medium">
-                                            <span className="text-brand-primary animate-pulse">Downloading...</span>
-                                            <span>{downloadProgress}%</span>
-                                        </div>
-                                        <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 overflow-hidden">
-                                            <div className="bg-brand-primary h-2.5 rounded-full transition-all duration-300 relative" style={{ width: `${downloadProgress}%` }}>
-                                                <div className="absolute inset-0 bg-white/30 animate-[shimmer_2s_infinite]"></div>
-                                            </div>
+                            {/* Progress Bar */}
+                            {isDownloading && (
+                                <div className="space-y-2 pt-2 animate-fade-in">
+                                    <div className="flex justify-between text-xs font-medium">
+                                        <span className="text-brand-primary animate-pulse">Downloading...</span>
+                                        <span>{downloadProgress}%</span>
+                                    </div>
+                                    <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 overflow-hidden">
+                                        <div className="bg-brand-primary h-2.5 rounded-full transition-all duration-300 relative" style={{ width: `${downloadProgress}%` }}>
+                                            <div className="absolute inset-0 bg-white/30 animate-[shimmer_2s_infinite]"></div>
                                         </div>
                                     </div>
-                                )}
-
-                                {/* Action Buttons */}
-                                <div className="pt-4 flex gap-3">
-                                    <Button variant="secondary" onClick={() => setIsDownloadModalOpen(false)} disabled={isDownloading} className="flex-1">
-                                        Close
-                                    </Button>
-
-                                    {isDownloading ? (
-                                        // ✅ STOP BUTTON
-                                        <Button onClick={handleStopDownload} className="flex-1 bg-red-500 hover:bg-red-600 text-white border-red-600 shadow-red-500/20">
-                                            ⏹ Stop Download
-                                        </Button>
-                                    ) : (
-                                        // ✅ START BUTTON
-                                        <Button onClick={handleStartDownload} className="flex-1">
-                                            Start Download
-                                        </Button>
-                                    )}
                                 </div>
+                            )}
+
+                            {/* Action Buttons */}
+                            <div className="pt-4 flex gap-3">
+                                <Button variant="secondary" onClick={() => setIsDownloadModalOpen(false)} disabled={isDownloading} className="flex-1">
+                                    Close
+                                </Button>
+
+                                {isDownloading ? (
+                                    // ✅ STOP BUTTON
+                                    <Button onClick={handleStopDownload} className="flex-1 bg-red-500 hover:bg-red-600 text-white border-red-600 shadow-red-500/20">
+                                        ⏹ Stop Download
+                                    </Button>
+                                ) : (
+                                    // ✅ START BUTTON
+                                    <Button onClick={handleStartDownload} className="flex-1">
+                                        Start Download
+                                    </Button>
+                                )}
                             </div>
                         </Card>
-                    </div>
+                    </div >
                 )
             }
         </div >

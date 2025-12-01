@@ -19,7 +19,7 @@ qs.extend_pandas()
 
 market_service = MarketService()
 
-# ✅ 1. Progress Observer
+# ✅ 1. Progress Observer (As before)
 class ProgressObserver(bt.Observer):
     lines = ('progress',)
     params = (
@@ -48,8 +48,10 @@ class FractionalPercentSizer(bt.Sizer):
         return position.size
 
 class BacktestEngine:
-    # ✅ 2. Updated run method with progress_callback
-    def run(self, db: Session, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, custom_data_file: str = None, progress_callback=None):
+    # ✅ 2. Updated run method to accept Real Execution Params
+    def run(self, db: Session, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, custom_data_file: str = None, progress_callback=None, 
+            commission: float = 0.001, slippage: float = 0.0):
+        
         resample_compression = 1
         base_timeframe = timeframe
         df = None
@@ -131,7 +133,7 @@ class BacktestEngine:
         else:
             cerebro.adddata(data_feed)
 
-        # ✅ 3. Add Progress Observer
+        # Progress Observer
         if progress_callback:
             total_candles = len(df)
             if resample_compression > 1:
@@ -143,12 +145,17 @@ class BacktestEngine:
         if not strategy_class:
             return {"error": f"Strategy '{strategy_name}' not found via Map or File."}
         
-        # Valid Params Filtering
         valid_params = self._filter_params(strategy_class, clean_params)
         cerebro.addstrategy(strategy_class, **valid_params)
 
+        # ✅ REALISTIC EXECUTION CONFIGURATION
         cerebro.broker.setcash(initial_cash)
-        cerebro.broker.setcommission(commission=0.001) 
+        cerebro.broker.setcommission(commission=commission) # e.g., 0.001 for 0.1%
+        
+        # Slippage: Impact of market liquidity
+        if slippage > 0:
+            cerebro.broker.set_slippage_perc(perc=slippage)
+        
         cerebro.addsizer(FractionalPercentSizer, percents=90)
         
         # Add analyzers
@@ -165,7 +172,6 @@ class BacktestEngine:
         # Metrics Calculation
         qs_metrics = self._calculate_metrics(first_strat, start_value, end_value)
         
-        # Trade Log & Chart Data
         executed_trades = getattr(first_strat, 'trade_history', [])
         
         df['time'] = df.index.astype('int64') // 10**9 
@@ -190,68 +196,45 @@ class BacktestEngine:
             "candle_data": chart_candles 
         }
 
-    def optimize(self, db: Session, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, method="grid", population_size=50, generations=10, progress_callback=None, abort_callback=None):
+    # ✅ 3. Updated optimize method to pass commission & slippage
+    def optimize(self, db: Session, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, method="grid", population_size=50, generations=10, progress_callback=None, abort_callback=None,
+                 commission: float = 0.001, slippage: float = 0.0):
         
-        # 1. Fetch Data
+        # ... (Data Fetching Logic same as before) ...
         candles = market_service.get_candles_from_db(db, symbol, timeframe, start_date, end_date)
         
-        # If data is missing, automatically download it
         if not candles or len(candles) < 20:
-            print(f"Data missing for {symbol} {timeframe}. Auto-syncing from Exchange...")
-            if progress_callback: progress_callback(0, 100) # Notify user
-
+            print(f"Data missing for {symbol} {timeframe}. Auto-syncing...")
+            if progress_callback: progress_callback(0, 100)
             try:
-                # Use asyncio.run to call async function
                 asyncio.run(market_service.fetch_and_store_candles(
-                    db=db, 
-                    symbol=symbol, 
-                    timeframe=timeframe, 
-                    start_date=start_date, 
-                    end_date=end_date,
-                    limit=1000 # Or increase as needed
+                    db=db, symbol=symbol, timeframe=timeframe, start_date=start_date, end_date=end_date, limit=1000
                 ))
-                
-                # Fetch data again after download
                 candles = market_service.get_candles_from_db(db, symbol, timeframe, start_date, end_date)
-                
             except Exception as e:
                 print(f"Auto-sync failed: {e}")
 
         if not candles or len(candles) < 20:
-            return {"error": f"Insufficient Data. Could not fetch data for {symbol}."}
+            return {"error": f"Insufficient Data for {symbol}."}
 
         df = pd.DataFrame([{
-            'datetime': c.timestamp,
-            'open': c.open,
-            'high': c.high,
-            'low': c.low,
-            'close': c.close,
-            'volume': c.volume
+            'datetime': c.timestamp, 'open': c.open, 'high': c.high, 'low': c.low, 'close': c.close, 'volume': c.volume
         } for c in candles])
         df.set_index('datetime', inplace=True)
         
-        # 2. Parse Params Ranges
-        param_ranges = {} # { 'rsi_period': [10, 11, ... 30] }
+        # ... (Param parsing logic same as before) ...
+        param_ranges = {} 
         fixed_params = {}
-        
         for k, v in params.items():
             if isinstance(v, dict) and 'start' in v and 'end' in v:
-                start = float(v['start'])
-                end = float(v['end'])
-                step = float(v.get('step', 1))
-                if step == 0: step = 1
-                
+                start, end = float(v['start']), float(v['end'])
+                step = float(v.get('step', 1)) if float(v.get('step', 1)) != 0 else 1
                 vals = []
                 curr = start
                 while curr <= end + (step/1000): 
                     vals.append(curr)
                     curr += step
-                
-                if int(start) == start and int(step) == step:
-                    vals = [int(x) for x in vals]
-                else:
-                    vals = [round(x, 4) for x in vals]
-                    
+                vals = [int(x) if int(start)==start and int(step)==step else round(x, 4) for x in vals]
                 param_ranges[k] = vals
             else:
                 fixed_params[k] = v
@@ -259,7 +242,6 @@ class BacktestEngine:
         results = []
 
         if method == "grid":
-            # --- GRID SEARCH ---
             param_names = list(param_ranges.keys())
             param_values = list(param_ranges.values())
             combinations = list(itertools.product(*param_values))
@@ -267,33 +249,31 @@ class BacktestEngine:
             
             for i, combo in enumerate(combinations):
                 if abort_callback and abort_callback(): break
-                
                 instance_params = dict(zip(param_names, combo))
-                metrics = self._run_single_backtest(df, strategy_name, initial_cash, instance_params, fixed_params)
+                
+                # Pass commission and slippage here
+                metrics = self._run_single_backtest(df, strategy_name, initial_cash, instance_params, fixed_params, commission, slippage)
                 
                 metrics['params'] = instance_params
                 results.append(metrics)
-                
                 if progress_callback: progress_callback(i + 1, total)
 
         elif method == "genetic" or method == "geneticAlgorithm":
-            # --- GENETIC ALGORITHM ---
+            # Pass commission and slippage here
             results = self._run_genetic_algorithm(
                 df, strategy_name, initial_cash, param_ranges, fixed_params, 
                 pop_size=population_size, generations=generations, 
-                progress_callback=progress_callback, abort_callback=abort_callback
+                progress_callback=progress_callback, abort_callback=abort_callback,
+                commission=commission, slippage=slippage
             )
 
-        # Sort results by Profit (descending)
         results.sort(key=lambda x: x['profitPercent'], reverse=True)
         return results
 
-    # --- Genetic Algorithm Implementation ---
-    def _run_genetic_algorithm(self, df, strategy_name, initial_cash, param_ranges, fixed_params, pop_size=50, generations=10, progress_callback=None, abort_callback=None):
+    # ✅ 4. Updated Genetic Algorithm to pass execution params
+    def _run_genetic_algorithm(self, df, strategy_name, initial_cash, param_ranges, fixed_params, pop_size=50, generations=10, progress_callback=None, abort_callback=None, commission=0.001, slippage=0.0):
         
         param_keys = list(param_ranges.keys())
-        
-        # 1. Initial Population
         population = []
         for _ in range(pop_size):
             individual = {k: random.choice(v) for k, v in param_ranges.items()}
@@ -304,67 +284,47 @@ class BacktestEngine:
 
         for gen in range(generations):
             if abort_callback and abort_callback(): break
-            
             evaluated_pop = []
             
-            # 2. Fitness Evaluation
             for i, individual in enumerate(population):
                 param_signature = json.dumps(individual, sort_keys=True)
                 
                 if param_signature in history_cache:
                     metrics = history_cache[param_signature]
                 else:
-                    metrics = self._run_single_backtest(df, strategy_name, initial_cash, individual, fixed_params)
+                    metrics = self._run_single_backtest(df, strategy_name, initial_cash, individual, fixed_params, commission, slippage)
                     metrics['params'] = individual
                     history_cache[param_signature] = metrics
                 
                 evaluated_pop.append(metrics)
-                
-                # Progress Update
                 current_step = (gen * pop_size) + (i + 1)
-                total_steps = generations * pop_size
-                if progress_callback: progress_callback(current_step, total_steps)
+                if progress_callback: progress_callback(current_step, generations * pop_size)
 
-            # 3. Sorting
             evaluated_pop.sort(key=lambda x: x['profitPercent'], reverse=True)
-            
-            # Save best 5
             best_results.extend(evaluated_pop[:5]) 
             
-            # 4. Selection (Elitism)
             elite_count = int(pop_size * 0.2)
             next_generation = [item['params'] for item in evaluated_pop[:elite_count]]
             
-            # 5. Crossover and Mutation
             while len(next_generation) < pop_size:
                 parent1 = random.choice(evaluated_pop[:int(pop_size/2)])['params']
                 parent2 = random.choice(evaluated_pop[:int(pop_size/2)])['params']
-                
                 child = parent1.copy()
-                
-                # Crossover
                 for k in param_keys:
-                    if random.random() > 0.5:
-                        child[k] = parent2[k]
-                
-                # Mutation
+                    if random.random() > 0.5: child[k] = parent2[k]
                 if random.random() < 0.2: 
                     mutate_key = random.choice(param_keys)
                     child[mutate_key] = random.choice(param_ranges[mutate_key])
-                
                 next_generation.append(child)
             
             population = next_generation
 
-        # Remove duplicates
         unique_results = {json.dumps(r['params'], sort_keys=True): r for r in best_results}
         return list(unique_results.values())
 
-    def _run_single_backtest(self, df, strategy_name, initial_cash, variable_params, fixed_params):
-        # Merge params
+    # ✅ 5. Updated Single Backtest Runner
+    def _run_single_backtest(self, df, strategy_name, initial_cash, variable_params, fixed_params, commission=0.001, slippage=0.0):
         full_params = {**fixed_params, **variable_params}
-        
-        # Clean params
         clean_params = {}
         for k, v in full_params.items():
             try: clean_params[k] = int(v)
@@ -381,19 +341,21 @@ class BacktestEngine:
             return {"profitPercent": 0, "maxDrawdown": 0, "sharpeRatio": 0}
 
         valid_params = self._filter_params(strategy_class, clean_params)
-
         cerebro.addstrategy(strategy_class, **valid_params)
-        cerebro.broker.setcash(initial_cash)
-        cerebro.broker.setcommission(commission=0.001)
-        cerebro.addsizer(bt.sizers.PercentSizer, percents=90)
         
+        # Apply Real Execution Params
+        cerebro.broker.setcash(initial_cash)
+        cerebro.broker.setcommission(commission=commission)
+        if slippage > 0:
+            cerebro.broker.set_slippage_perc(perc=slippage)
+            
+        cerebro.addsizer(bt.sizers.PercentSizer, percents=90)
         cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
         cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe", riskfreerate=0.0)
         
         try:
             results = cerebro.run()
             strat = results[0]
-            
             end_value = cerebro.broker.getvalue()
             profit_percent = ((end_value - initial_cash) / initial_cash) * 100
             
@@ -401,34 +363,28 @@ class BacktestEngine:
             max_drawdown = dd.get('max', {}).get('drawdown', 0)
             
             sharpe = strat.analyzers.sharpe.get_analysis()
-            sharpe_ratio = sharpe.get('sharperatio', 0)
-            if sharpe_ratio is None: sharpe_ratio = 0
+            sharpe_ratio = sharpe.get('sharperatio', 0) or 0
             
             return {
                 "profitPercent": round(profit_percent, 2),
                 "maxDrawdown": round(max_drawdown, 2),
                 "sharpeRatio": round(sharpe_ratio, 2)
             }
-        except Exception as e:
-            # print(f"Backtest Core Error: {e}")
+        except Exception:
             return {"profitPercent": 0, "maxDrawdown": 0, "sharpeRatio": 0}
 
-    # --- Helper Functions ---
+    # ... (Helper Functions remain unchanged) ...
     def _load_strategy_class(self, strategy_name):
         strategy_class = STRATEGY_MAP.get(strategy_name)
         if not strategy_class:
             try:
                 file_name = f"{strategy_name}.py" if not strategy_name.endswith(".py") else strategy_name
                 file_path = f"app/strategies/custom/{file_name}"
-
                 if os.path.exists(file_path):
                     spec = importlib.util.spec_from_file_location("custom_strategy", file_path)
                     module = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(module)
-                    
-                    # Register module to sys
                     sys.modules[file_name.replace('.py', '')] = module
-
                     for name, obj in inspect.getmembers(module):
                         if inspect.isclass(obj) and issubclass(obj, bt.Strategy) and obj is not bt.Strategy:
                             return obj
@@ -448,9 +404,11 @@ class BacktestEngine:
         return valid_params
 
     def _calculate_metrics(self, first_strat, start_value, end_value):
+        # Default values
         qs_metrics = {
-            "sharpe": 0, "sortino": 0, "max_drawdown": 0,
-            "win_rate": 0, "profit_factor": 0, "cagr": 0
+            "sharpe": 0, "sortino": 0, "max_drawdown": 0, "win_rate": 0, 
+            "profit_factor": 0, "cagr": 0, "volatility": 0, "calmar": 0, 
+            "recovery_factor": 0, "expected_return": 0
         }
         heatmap_data = []
         underwater_data = []
@@ -461,16 +419,23 @@ class BacktestEngine:
             returns, positions, transactions, gross_lev = portfolio_stats.get_pf_items()
             returns.index = returns.index.tz_localize(None)
 
+            # ✅ Added more metrics here
             qs_metrics = {
                 "sharpe": qs.stats.sharpe(returns),
                 "sortino": qs.stats.sortino(returns),
                 "max_drawdown": qs.stats.max_drawdown(returns) * 100,
                 "win_rate": qs.stats.win_rate(returns) * 100,
                 "profit_factor": qs.stats.profit_factor(returns),
-                "cagr": qs.stats.cagr(returns) * 100
+                "cagr": qs.stats.cagr(returns) * 100,
+                
+                # 🔥 New metrics added (previously missing)
+                "volatility": qs.stats.volatility(returns) * 100,       # Market volatility
+                "calmar": qs.stats.calmar(returns),                     # Risk-adjusted return
+                "recovery_factor": qs.stats.recovery_factor(returns),   # Ability to recover from loss
+                "expected_return": qs.stats.expected_return(returns) * 100 # Average return
             }
 
-            # Heatmap
+            # Heatmap Logic (Same as before)
             if not returns.empty:
                 monthly_ret_series = returns.resample('M').apply(lambda x: (1 + x).prod() - 1)
                 for timestamp, value in monthly_ret_series.items():
@@ -481,11 +446,11 @@ class BacktestEngine:
                             "value": round(value * 100, 2)
                         })
 
-            # Underwater
+            # Underwater Logic (Same as before)
             drawdown_series = qs.stats.to_drawdown_series(returns)
             underwater_data = [{"time": int(t.timestamp()), "value": round(v * 100, 2)} for t, v in drawdown_series.items()]
 
-            # Histogram
+            # Histogram Logic (Same as before)
             clean_returns = returns.dropna()
             if not clean_returns.empty:
                 hist_values, bin_edges = np.histogram(clean_returns * 100, bins=20)
@@ -495,7 +460,8 @@ class BacktestEngine:
                             "range": f"{round(bin_edges[i], 1)}% to {round(bin_edges[i+1], 1)}%",
                             "frequency": int(hist_values[i])
                         })
-        except:
+        except Exception as e:
+            # print(f"Metrics Error: {e}")
             pass
             
         return {

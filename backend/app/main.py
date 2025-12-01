@@ -465,7 +465,9 @@ def run_backtest(
         params=request.params,
         start_date=request.start_date,
         end_date=request.end_date,
-        custom_data_file=request.custom_data_file
+        custom_data_file=request.custom_data_file,
+        commission=request.commission,
+        slippage=request.slippage
     )
     
     # সাথে সাথে Task ID রিটার্ন করা হবে
@@ -522,7 +524,9 @@ def run_optimization(
         # ✅ নতুন প্যারামিটার
         method=request.method,
         population_size=request.population_size,
-        generations=request.generations
+        generations=request.generations,
+        commission=request.commission,
+        slippage=request.slippage
     )
     
     return {"task_id": task.id, "status": "Processing"}

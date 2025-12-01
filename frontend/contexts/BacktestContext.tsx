@@ -24,6 +24,12 @@ interface BacktestContextType {
     optimizationParams: Record<string, any>;
     setOptimizationParams: (p: Record<string, any>) => void;
 
+    // ✅ নতুন স্টেট টাইপ
+    commission: number;
+    setCommission: (c: number) => void;
+    slippage: number;
+    setSlippage: (s: number) => void;
+
     strategies: string[];
     setStrategies: React.Dispatch<React.SetStateAction<string[]>>;
     customStrategies: string[];
@@ -63,6 +69,10 @@ export const BacktestProvider: React.FC<{ children: ReactNode }> = ({ children }
     const [params, setParams] = useState<Record<string, any>>({});
     const [optimizableParams, setOptimizableParams] = useState<Record<string, any>>({});
     const [optimizationParams, setOptimizationParams] = useState<Record<string, any>>({});
+
+    // ✅ নতুন স্টেট (ডিফল্ট: 0.1% কমিশন, 0% স্লিপেজ)
+    const [commission, setCommission] = useState(0.001);
+    const [slippage, setSlippage] = useState(0.0);
 
     const [singleResult, setSingleResult] = useState<BacktestResult | null>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -104,7 +114,11 @@ export const BacktestProvider: React.FC<{ children: ReactNode }> = ({ children }
                 initial_cash: options?.initial_cash || 10000,
                 start_date: startDate,
                 end_date: endDate,
-                params: options?.params || params
+                params: options?.params || params,
+
+                // ✅ নতুন: API তে পাঠানো হচ্ছে
+                commission: commission,
+                slippage: slippage
             });
 
             const taskId = initialResponse.task_id;
@@ -194,6 +208,10 @@ export const BacktestProvider: React.FC<{ children: ReactNode }> = ({ children }
             statusMessage, // এক্সপোর্ট করা হলো যাতে UI তে দেখানো যায়
             runBacktest,
             refreshStrategyList,
+
+            // ✅ নতুন ভ্যালু এক্সপোর্ট
+            commission, setCommission,
+            slippage, setSlippage,
             // Aliases
             results: singleResult,
             isRunning: isLoading,
