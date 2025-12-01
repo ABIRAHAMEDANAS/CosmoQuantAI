@@ -621,6 +621,43 @@ const Backtester: React.FC = () => {
         setBacktestResult(null);
         setProgress(0);
 
+        // Optimization Mode Handling
+        if (backtestMode === 'optimization') {
+            setIsOptimizing(true);
+            setOptimizationProgress(0);
+
+            try {
+                const payload = {
+                    symbol: symbol,
+                    timeframe: timeframe,
+                    strategy: strategy,
+                    initial_cash: initialCash,
+                    start_date: startDate,
+                    end_date: endDate,
+                    params: optimizationParams, // Optimization Params
+                    method: optimizationMethod === 'gridSearch' ? 'grid' : 'genetic',
+                    population_size: gaParams.populationSize,
+                    generations: gaParams.generations
+                };
+
+                const res = await runOptimizationApi(payload as any); // Type assertion if needed, or update interface
+                const taskId = res.task_id;
+                localStorage.setItem('activeOptimizationId', taskId);
+
+                pollOptimizationStatus(taskId);
+                showToast('Optimization Started!', 'success');
+
+            } catch (error) {
+                console.error(error);
+                setIsOptimizing(false);
+                showToast('Failed to start optimization.', 'error');
+            } finally {
+                setIsRunning(false);
+            }
+            return;
+        }
+
+        // Standard Backtest Mode
         try {
             let payloadSymbol = symbol;
             let payloadFile = null;
@@ -908,6 +945,23 @@ const Backtester: React.FC = () => {
                     <Card className="staggered-fade-in" style={{ animationDelay: '200ms' }}>
                         <div className="flex items-center justify-between mb-6">
                             <h2 className="text-xl font-bold text-slate-900 dark:text-white">Backtest Configuration</h2>
+
+                            {/* ✅ Mode Switcher */}
+                            <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+                                <button
+                                    onClick={() => setBacktestMode('single')}
+                                    className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${backtestMode === 'single' ? 'bg-white dark:bg-brand-primary text-slate-900 dark:text-white shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+                                >
+                                    Single Backtest
+                                </button>
+                                <button
+                                    onClick={() => setBacktestMode('optimization')}
+                                    className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${backtestMode === 'optimization' ? 'bg-white dark:bg-brand-primary text-slate-900 dark:text-white shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+                                >
+                                    AI Optimization
+                                </button>
+                            </div>
+
                             <Button variant="secondary" onClick={handleSyncData} disabled={isSyncing}>
                                 {isSyncing ? "Syncing..." : "☁ Sync Data"}
                             </Button>
@@ -1177,24 +1231,29 @@ const Backtester: React.FC = () => {
                     {/* Batch/Optimization Results Table */}
                     {(batchResults || multiObjectiveResults) && (
                         <Card>
-                            <h2 className="text-xl font-bold mb-6">{batchResults ? 'Batch Results' : 'Optimization Results'}</h2>
+                            <h2 className="text-xl font-bold mb-6 text-purple-400">{batchResults ? 'Batch Results' : 'Optimization Report'}</h2>
                             <div className="overflow-x-auto">
-                                <table className="w-full text-left">
-                                    <thead>
-                                        <tr className="border-b border-gray-700">
-                                            <th className="p-4">Strategy/Params</th><th className="p-4 text-right">Profit</th><th className="p-4 text-right">Drawdown</th><th className="p-4 text-right">Sharpe</th>
-                                            {multiObjectiveResults && <th className="p-4 text-center">Action</th>}
+                                <table className="w-full text-left text-sm">
+                                    <thead className="bg-gray-100 dark:bg-gray-900 text-gray-500 uppercase">
+                                        <tr className="border-b border-gray-200 dark:border-gray-700">
+                                            <th className="px-4 py-3">Rank</th>
+                                            <th className="px-4 py-3">Profit %</th>
+                                            <th className="px-4 py-3">Sharpe Ratio</th>
+                                            <th className="px-4 py-3">Max DD</th>
+                                            <th className="px-4 py-3">Parameters</th>
+                                            {multiObjectiveResults && <th className="px-4 py-3 text-center">Action</th>}
                                         </tr>
                                     </thead>
-                                    <tbody>
+                                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                                         {(batchResults || multiObjectiveResults)?.map((res: any, idx: number) => (
-                                            <tr key={idx} className="border-b border-gray-800 hover:bg-white/5">
-                                                <td className="p-4 font-mono text-xs">{res.strategy || JSON.stringify(res.params)}</td>
-                                                <td className={`p-4 text-right ${res.profitPercent >= 0 ? 'text-green-500' : 'text-red-500'}`}>{res.profitPercent.toFixed(2)}%</td>
-                                                <td className="p-4 text-right text-red-400">{res.maxDrawdown.toFixed(2)}%</td>
-                                                <td className="p-4 text-right">{res.sharpeRatio.toFixed(2)}</td>
+                                            <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                                                <td className="px-4 py-3 font-bold text-gray-500">#{idx + 1}</td>
+                                                <td className={`px-4 py-3 font-bold ${res.profitPercent >= 0 ? 'text-green-500' : 'text-red-500'}`}>{res.profitPercent.toFixed(2)}%</td>
+                                                <td className="px-4 py-3 font-mono">{res.sharpeRatio.toFixed(2)}</td>
+                                                <td className="px-4 py-3 text-red-500">-{res.maxDrawdown.toFixed(2)}%</td>
+                                                <td className="px-4 py-3 text-xs text-gray-500 font-mono">{JSON.stringify(res.params).replace(/"/g, '').replace(/{|}/g, '')}</td>
                                                 {multiObjectiveResults && (
-                                                    <td className="p-4 text-center"><Button size="sm" variant="outline" onClick={() => handleLoadParams(res.params)}>Load</Button></td>
+                                                    <td className="px-4 py-3 text-center"><Button size="sm" variant="outline" onClick={() => handleLoadParams(res.params)}>Load</Button></td>
                                                 )}
                                             </tr>
                                         ))}
