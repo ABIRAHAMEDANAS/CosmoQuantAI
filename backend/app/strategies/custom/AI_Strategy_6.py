@@ -1,43 +1,38 @@
 # @params
 # {
-#   "period": { "type": "number", "label": "RSI Period", "default": 14, "min": 2, "max": 100, "step": 1 },
-#   "oversold": { "type": "number", "label": "RSI Oversold Level", "default": 30, "min": 10, "max": 50, "step": 1 },
-#   "overbought": { "type": "number", "label": "RSI Overbought Level", "default": 70, "min": 50, "max": 90, "step": 1 }
+#   "period": { "type": "number", "label": "SMA Period", "default": 20, "min": 2, "max": 200, "step": 1 },
+#   "multiplier": { "type": "number", "label": "Std Dev Multiplier", "default": 2.0, "min": 0.5, "max": 5.0, "step": 0.1 }
 # }
 # @params_end
 import backtrader as bt
-from app.strategies.base_strategy import BaseStrategy
+import datetime
+import pandas as pd
+import random # For dummy data generation
 
-class RSIStrategy(BaseStrategy):
+class BollingerStrategy(bt.Strategy):
     params = (
-        ('period', 14),
-        ('oversold', 30),
-        ('overbought', 70),
+        ('period', 20),
+        ('multiplier', 2.0),
     )
 
     def __init__(self):
         self.trade_history = []
-        self.rsi = bt.indicators.RSI(self.data.close, period=self.p.period)
+        self.dataclose = self.datas[0].close
+        self.order = None # Keep track of pending order
 
-        # Crossover / Crossunder conditions
-        # Long Entry: RSI crosses OVER the Oversold level (30)
-        self.crossover_oversold = bt.indicators.CrossOver(self.rsi, self.p.oversold)
-        # Short Entry: RSI crosses UNDER the Overbought level (70)
-        self.crossunder_overbought = bt.indicators.CrossDown(self.rsi, self.p.overbought)
+        # Bollinger Bands indicator
+        self.bband = bt.indicators.BollingerBands(
+            self.datas[0],
+            period=self.p.period,
+            devfactor=self.p.multiplier
+        )
 
-        self.order = None  # To keep track of pending orders
+        self.upperband = self.bband.top
+        self.middleband = self.bband.mid
+        self.lowerband = self.bband.bot
 
     def notify_order(self, order):
-        if order.status in [order.Submitted, order.Accepted]:
-            # Order submitted/accepted - no action required
-            return
-
         if order.status in [order.Completed]:
-            if order.isbuy():
-                pass # self.log(f'BUY EXECUTED, Price: {order.executed.price:.2f}, Size: {order.executed.size}, Cost: {order.executed.value:.2f}, Comm: {order.executed.comm:.2f}')
-            else:  # Sell
-                pass # self.log(f'SELL EXECUTED, Price: {order.executed.price:.2f}, Size: {order.executed.size}, Cost: {order.executed.value:.2f}, Comm: {order.executed.comm:.2f}')
-
             is_buy = order.isbuy()
             self.trade_history.append({
                 "type": "buy" if is_buy else "sell",
@@ -45,30 +40,118 @@ class RSIStrategy(BaseStrategy):
                 "size": order.executed.size,
                 "time": int(bt.num2date(order.executed.dt).timestamp())
             })
-
         elif order.status in [order.Canceled, order.Margin, order.Rejected]:
-            pass # self.log('Order Canceled/Margin/Rejected')
+            self.log(f'Order Canceled/Margin/Rejected: {order.getstatusname(order.status)}')
 
         self.order = None # No pending order anymore
 
-    def next(self):
-        if self.order:
-            return  # A previous order is pending, do not create new ones
+    def log(self, txt, dt=None):
+        ''' Logging function for the strategy '''
+        dt = dt or self.datas[0].datetime.date(0)
+        # print(f'{dt.isoformat()}, {txt}')
 
-        # Long Entry: RSI crosses OVER the Oversold level (30)
-        if self.crossover_oversold[0]: # [0] means current bar
-            if self.position.size < 0:  # If currently short, close short and go long
-                self.close()  # Close existing short position
-                self.order = self.buy()  # Then open a long position
-            elif self.position.size == 0:  # If flat, open a long position
+    def next(self):
+        # Simply log the closing price of the current bar
+        # self.log(f'Close: {self.dataclose[0]:.2f}')
+
+        # Check if an order is pending. If yes, we can't send a new one.
+        if self.order:
+            return
+
+        # Check if we are in the market
+        if not self.position:  # Not in the market
+            # Buy signal: price crosses below the lower band
+            if self.dataclose[0] < self.lowerband[0]:
+                self.log(f'BUY CREATE, {self.dataclose[0]:.2f}')
                 self.order = self.buy()
 
-        # Short Entry: RSI crosses UNDER the Overbought level (70)
-        # Use elif to ensure only one trade per bar from these conditions,
-        # mimicking Pine Script's sequential if statements for entry.
-        elif self.crossunder_overbought[0]:
-            if self.position.size > 0:  # If currently long, close long and go short
-                self.close()  # Close existing long position
-                self.order = self.sell()  # Then open a short position
-            elif self.position.size == 0:  # If flat, open a short position
+            # Sell signal: price crosses above the upper band (initiate short)
+            elif self.dataclose[0] > self.upperband[0]:
+                self.log(f'SELL CREATE, {self.dataclose[0]:.2f}')
                 self.order = self.sell()
+
+        else:  # In the market, check for exit conditions
+            if self.position.size > 0:  # Currently long
+                # Exit long: price crosses above the middle band
+                if self.dataclose[0] > self.middleband[0]:
+                    self.log(f'CLOSE LONG, {self.dataclose[0]:.2f}')
+                    self.order = self.close()
+
+            elif self.position.size < 0:  # Currently short
+                # Exit short: price crosses below the middle band
+                if self.dataclose[0] < self.middleband[0]:
+                    self.log(f'CLOSE SHORT, {self.dataclose[0]:.2f}')
+                    self.order = self.close()
+
+if __name__ == '__main__':
+    # 1. Create a Cerebro entity
+    cerebro = bt.Cerebro()
+
+    # 2. Add our strategy
+    cerebro.addstrategy(BollingerStrategy)
+
+    # Generate some dummy data for demonstration
+    start_date = datetime.datetime(2020, 1, 1)
+    end_date = datetime.datetime(2021, 1, 1)
+    dates = pd.date_range(start=start_date, end=end_date, freq='D')
+    
+    # Simulate a trending and volatile price series
+    price = 100.0
+    prices = []
+    for _ in dates:
+        prices.append(price)
+        # Random walk with some trend and volatility
+        price += random.uniform(-1, 1) + 0.1 # slight upward drift
+        if random.random() < 0.1: # occasional larger jump/drop
+            price += random.uniform(-5, 5)
+        price = max(price, 50.0) # Ensure price doesn't go too low
+
+    df = pd.DataFrame({
+        'Open': prices,
+        'High': [p + abs(random.gauss(0, 1)) for p in prices],
+        'Low': [p - abs(random.gauss(0, 1)) for p in prices],
+        'Close': prices,
+        'Volume': [random.randint(1000, 5000) for _ in prices]
+    }, index=dates)
+
+    # Convert to Backtrader data feed
+    data = bt.feeds.PandasData(
+        dataname=df,
+        fromdate=start_date,
+        todate=end_date,
+        datetime='index',
+        open='Open',
+        high='High',
+        low='Low',
+        close='Close',
+        volume='Volume',
+        openinterest=-1
+    )
+
+    # 3. Add the Data Feed to Cerebro
+    cerebro.adddata(data)
+
+    # 4. Set starting cash
+    cerebro.broker.setcash(100000.0)
+
+    # 5. Set the commission
+    cerebro.broker.setcommission(commission=0.001) # 0.1% commission
+
+    # Print out the starting cash
+    print(f'Starting Portfolio Value: {cerebro.broker.getvalue():.2f}')
+
+    # 6. Run the backtest
+    strategies = cerebro.run()
+    strategy = strategies[0] # Get the first (and only) strategy instance
+
+    # Print out the final results
+    print(f'Final Portfolio Value: {cerebro.broker.getvalue():.2f}')
+    print(f'Trade History: {strategy.trade_history}')
+
+    # 7. Plot the results
+    # cerebro.plot() # Uncomment to see the plot
+    # The `cerebro.plot()` function will automatically plot indicators and trades.
+    # To get a DataFrame as requested by the original prompt, you'd typically use
+    # a Backtrader Analyzer or iterate through the strategy's lines/indicators
+    # after the run, but that's beyond the scope of a standard Backtrader `next`
+    # method output. The `trade_history` provides the requested trade data.
