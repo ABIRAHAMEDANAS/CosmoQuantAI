@@ -270,6 +270,36 @@ const Backtester: React.FC = () => {
     const [isRunning, setIsRunning] = useState(false);
     const [backtestResult, setBacktestResult] = useState<any>(null);
     const [progress, setProgress] = useState(0);
+    const [syncStatusMessage, setSyncStatusMessage] = useState("");
+    const [syncProgress, setSyncProgress] = useState(0); // ✅ নতুন স্টেট
+    const [syncStatusText, setSyncStatusText] = useState("Initializing..."); // ✅ নতুন স্টেট
+
+    // WebSocket Connection for Sync Progress
+    useEffect(() => {
+        const ws = new WebSocket("ws://localhost:8000/ws");
+
+        ws.onopen = () => {
+            console.log("Connected to WebSocket for Progress");
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === "sync_progress") {
+                    setProgress(data.payload.progress);
+                    setSyncStatusMessage(data.payload.message);
+
+                    if (data.payload.progress === 100) {
+                        setTimeout(() => setIsSyncing(false), 2000);
+                    }
+                }
+            } catch (e) {
+                console.error("WS Parse Error", e);
+            }
+        };
+
+        return () => ws.close();
+    }, []);
 
     // Download Modal States
     const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
@@ -684,13 +714,82 @@ const Backtester: React.FC = () => {
         }
     }, [pollOptimizationStatus]);
 
+    // ✅ WebSocket Listener Fix
+    useEffect(() => {
+        // আপনার ব্যাকএন্ড URL এবং পোর্ট (8000)
+        const safeSymbol = symbol ? symbol.replace('/', '') : 'BTCUSDT';
+        const wsUrl = `ws://localhost:8000/ws/market-data/${safeSymbol}`;
+
+        let ws: WebSocket | null = null; // WebSocket রেফারেন্স
+
+        try {
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                console.log("Connected to Sync WS");
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    // 🎯 শুধু 'sync_progress' টাইপের মেসেজ আমরা প্রসেস করব
+                    if (data.type === "sync_progress") {
+
+                        // ❌ ভুল কোড (যা এরর দিচ্ছে): 
+                        // setProgress(data.payload.progress); 
+
+                        // ✅ সঠিক কোড:
+                        // ব্যাকএন্ড এখন সরাসরি 'percent' এবং 'status' পাঠায়
+                        setSyncProgress(data.percent || 0);
+                        setSyncStatusText(data.status || "Processing...");
+
+                        // ১০০% হয়ে গেলে লোডিং বন্ধ করা
+                        if (data.percent === 100) {
+                            setTimeout(() => setIsSyncing(false), 1000);
+                        }
+                    }
+                } catch (err) {
+                    // জেসন পার্সিং এরর বা অন্য কোনো সাধারণ এরর ইগনোর করা হচ্ছে
+                    // console.warn("WS Message Parse Error", err);
+                }
+            };
+
+            ws.onerror = (err) => {
+                console.error("WS Error:", err);
+            };
+
+        } catch (e) {
+            console.error("WS Connection Failed", e);
+        }
+
+        return () => {
+            if (ws) ws.close();
+        };
+    }, [symbol]); // সিম্বল পাল্টালে রিকানেক্ট হবে
+
     const handleSyncData = async () => {
         setIsSyncing(true);
+        setSyncProgress(0); // ✅ রিসেট
+        setSyncStatusText("Starting Sync...");
+
         try {
-            await syncMarketData(symbol, timeframe, startDate, endDate);
-            showToast(`Synced historical data for ${symbol}`, 'success');
-        } catch (error) { console.error(error); showToast('Failed to sync market data.', 'error'); }
-        finally { setIsSyncing(false); }
+            // API কল করা (এটি ব্যাকগ্রাউন্ডে চলতে থাকবে)
+            const response = await syncMarketData(symbol, timeframe, startDate, endDate);
+
+            // যদি API রেসপন্স এরর দেয়
+            if (response.status === 'error') {
+                showToast(`Sync Failed: ${response.message}`, 'error');
+                setIsSyncing(false);
+            } else {
+                showToast(`Synced historical data for ${symbol}`, 'success');
+                // সাকসেস হলে WebSocket 100% মেসেজ পাঠাবে, তাই এখানে কিছু না করলেও হবে
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('Failed to sync market data.', 'error');
+            setIsSyncing(false); // এরর হলে বন্ধ করুন
+        }
     };
 
     // ✅ ২. রান ব্যাকটেস্ট হ্যান্ডলার (আপডেটেড)
@@ -1059,6 +1158,26 @@ const Backtester: React.FC = () => {
                                     {isSyncing ? "Syncing..." : "☁ Sync Data"}
                                 </Button>
                             </div>
+
+                            {/* Sync Progress Bar */}
+                            {isSyncing && (
+                                <Card className="mt-4 border border-blue-500/20 bg-blue-500/5 animate-fade-in">
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between text-xs font-medium text-blue-600 dark:text-blue-400">
+                                            <span className="animate-pulse">{syncStatusText}</span>
+                                            <span>{syncProgress}%</span>
+                                        </div>
+                                        <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 overflow-hidden">
+                                            <div
+                                                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-out relative"
+                                                style={{ width: `${syncProgress}%` }}
+                                            >
+                                                <div className="absolute inset-0 bg-white/30 animate-[shimmer_2s_infinite]"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </Card>
+                            )}
 
                             {/* ✅ ডাটা সোর্স টগল */}
                             <div className="mb-6 border-b border-gray-200 pb-4">

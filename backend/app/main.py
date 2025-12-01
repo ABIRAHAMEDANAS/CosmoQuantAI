@@ -335,6 +335,18 @@ async def websocket_endpoint(websocket: WebSocket, symbol: str):
         manager.disconnect(websocket)
         print(f"Client disconnected from {symbol} stream")
 
+# ✅ নতুন: সাধারণ WebSocket এন্ডপয়েন্ট (Progress Updates এর জন্য)
+@app.websocket("/ws")
+async def websocket_general(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # ক্লায়েন্ট থেকে মেসেজ শোনার জন্য অপেক্ষা (কানেকশন ধরে রাখার জন্য)
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+
 # --- Strategy Upload Endpoint ---
 @app.post("/api/strategies/upload")
 async def upload_strategy(file: UploadFile = File(...), current_user: models.User = Depends(auth.get_current_user)):

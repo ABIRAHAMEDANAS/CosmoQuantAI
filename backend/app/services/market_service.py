@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from app import models
 from app.constants import VALID_TIMEFRAMES 
 import asyncio
+from tqdm import tqdm  # ✅ কনসোল প্রোগ্রেস বারের জন্য
+from app.services.websocket_manager import manager # ✅ ওয়েব সকেট ম্যানেজার
 
 class MarketService:
     def __init__(self):
@@ -23,20 +25,19 @@ class MarketService:
     async def fetch_and_store_candles(self, db: Session, symbol: str, timeframe: str, start_date: str = None, end_date: str = None, limit: int = 1000):
         # 1. Exchange Setup
         exchange = ccxt.binance({
-            'enableRateLimit': True, # অটোমেটিক রেট লিমিট হ্যান্ডেল করবে
+            'enableRateLimit': True,
         })
         
         try:
-            # 2. Check if timeframe is supported by Binance
+            # 2. Check if timeframe is supported
             await exchange.load_markets()
             if timeframe not in exchange.timeframes:
-                # যদি 45m হয় যা Binance এ নেই, তখন আমরা এরর দিব। 
-                # ইউজারকে 15m ডাটা সিঙ্ক করতে হবে, ব্যাকটেস্টার সেটা কনভার্ট করে নিবে।
                 return {
                     "status": "error", 
-                    "message": f"Binance does not support '{timeframe}'. Please sync '15m' or '1m' instead, and the Backtester will resample it."
+                    "message": f"Binance does not support '{timeframe}'. Please sync '15m' or '1m' instead."
                 }
 
+            # টাইম রেঞ্জ ক্যালকুলেশন
             since_ts = None
             end_ts = int(datetime.utcnow().timestamp() * 1000)
 
@@ -49,7 +50,7 @@ class MarketService:
                 end_dt = end_dt.replace(hour=23, minute=59, second=59)
                 end_ts = int(end_dt.timestamp() * 1000)
 
-            # 3. Latest Data (No Loop)
+            # 3. Latest Data (No Loop if start_date is not provided)
             if not since_ts:
                  try:
                     ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
@@ -58,43 +59,69 @@ class MarketService:
                  except Exception as e:
                      return {"status": "error", "message": f"Fetch Error: {str(e)}"}
 
-            # 4. Historical Data Loop
+            # 4. Historical Data Loop with Progress Bar
             total_saved = 0
             tf_ms = self.timeframe_to_ms(timeframe)
             current_since = since_ts
+            
+            # মোট কত সময় বাকি তা হিসাব করা (প্রোগ্রেস এর জন্য)
+            total_duration = end_ts - since_ts
+            
+            # ✅ TQDM এবং WebSocket লজিক শুরু
+            with tqdm(total=total_duration, desc=f"Syncing {symbol}", unit="ms") as pbar:
+                while current_since < end_ts:
+                    try:
+                        ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=1000, since=current_since)
+                    except Exception as e:
+                        print(f"Error fetching batch: {e}")
+                        break 
 
-            while current_since < end_ts:
-                try:
-                    ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=1000, since=current_since)
-                except Exception as e:
-                    print(f"Error fetching batch: {e}")
-                    break # নেটওয়ার্ক এরর হলে লুপ থামিয়ে যতটুকু হয়েছে সেভ থাকবে
+                    if not ohlcv:
+                        break
+                    
+                    filtered_ohlcv = [c for c in ohlcv if c[0] <= end_ts]
+                    saved_count = self._save_candles(db, filtered_ohlcv, symbol, timeframe)
+                    total_saved += saved_count
+                    
+                    if not filtered_ohlcv:
+                        break
 
-                if not ohlcv:
-                    break
-                
-                filtered_ohlcv = [c for c in ohlcv if c[0] <= end_ts]
-                saved_count = self._save_candles(db, filtered_ohlcv, symbol, timeframe)
-                total_saved += saved_count
-                
-                if not filtered_ohlcv:
-                    break
+                    last_time = filtered_ohlcv[-1][0]
+                    
+                    # ✅ প্রোগ্রেস ক্যালকুলেশন
+                    progress_percent = int(((last_time - since_ts) / total_duration) * 100)
+                    progress_percent = min(100, max(0, progress_percent)) # 0-100 এর মধ্যে রাখা
 
-                last_time = filtered_ohlcv[-1][0]
-                
-                if last_time == current_since:
-                    current_since += tf_ms * 1000
-                else:
-                    current_since = last_time + tf_ms
-                
-                # ✅ রেট লিমিট এড়ানোর জন্য ছোট বিরতি
-                await asyncio.sleep(0.1)
+                    # ✅ TQDM আপডেট (ব্যাকএন্ড কনসোলে)
+                    pbar.update(last_time - current_since)
+
+                    # ✅ ফ্রন্টএন্ডে WebSocket মেসেজ পাঠানো
+                    await manager.broadcast({
+                        "type": "sync_progress",
+                        "percent": progress_percent,
+                        "status": f"Syncing {symbol}... {progress_percent}%"
+                    })
+
+                    # পরবর্তী লুপের জন্য সময় সেট করা
+                    if last_time == current_since:
+                        current_since += tf_ms * 1000
+                    else:
+                        current_since = last_time + tf_ms
+                    
+                    # ✅ ইভেন্ট লুপ ব্লক না করার জন্য ছোট বিরতি
+                    await asyncio.sleep(0.1)
+
+            # ✅ ফাইনাল ১০০% মেসেজ পাঠানো
+            await manager.broadcast({
+                "type": "sync_progress",
+                "percent": 100,
+                "status": "Sync Completed!"
+            })
 
             return {
                 "status": "success", 
                 "new_candles_stored": total_saved, 
                 "range": f"{start_date} to {end_date or 'Now'}",
-                "note": "For large date ranges, ensure this task runs in background."
             }
 
         except Exception as e:
@@ -104,14 +131,11 @@ class MarketService:
             await exchange.close()
 
     def _save_candles(self, db: Session, ohlcv: list, symbol: str, timeframe: str):
-        # বাল্ক ইনসার্ট ব্যবহার করলে অনেক দ্রুত হবে
         candles_to_insert = []
         for candle in ohlcv:
             timestamp_ms = candle[0]
             dt_object = datetime.fromtimestamp(timestamp_ms / 1000.0)
             
-            # ডুপ্লিকেট চেক করার জন্য আমরা এখানে সিম্পল লজিক রাখছি, 
-            # কিন্তু প্রোডাকশনে `ON CONFLICT DO NOTHING` ব্যবহার করা উচিত
             existing = db.query(models.MarketData.id).filter(
                 models.MarketData.symbol == symbol,
                 models.MarketData.timeframe == timeframe,
@@ -180,49 +204,19 @@ class MarketService:
         return query.order_by(models.MarketData.timestamp.asc()).all()
 
     def cleanup_old_data(self, db: Session, retention_rules: dict = None):
-        """
-        পুরানো ডাটা মুছে ফেলার জন্য।
-        retention_rules: { '1s': 7, '1m': 30 } (days)
-        """
         if not retention_rules:
-            # ডিফল্ট রুলস
             retention_rules = {
-                '1s': 7,    # ১ সেকেন্ড ডাটা ৭ দিন থাকবে
-                '5s': 7,
-                '10s': 7,
-                '15s': 7,
-                '30s': 7,
-                '1m': 30,   # ১ মিনিট ডাটা ৩০ দিন
-                '3m': 30,
-                '5m': 30,
-                '15m': 30,
-                '30m': 30,
-                '1h': 365,  # ১ ঘণ্টা ডাটা ১ বছর
-                '2h': 365,
-                '4h': 365,
-                '6h': 365,
-                '8h': 365,
-                '12h': 365,
-                '1d': 365*5, # ১ দিন ডাটা ৫ বছর
-                '3d': 365*5,
-                '1w': 365*5,
-                '1M': 365*5
+                '1s': 7, '1m': 30, '1h': 365, '1d': 365*5
             }
         
         total_deleted = 0
-        
         for tf, days in retention_rules.items():
             cutoff_date = datetime.utcnow() - timedelta(days=days)
-            
-            # বাল্ক ডিলিট (খুব বেশি ডাটা হলে ব্যাচে করা ভালো, তবে এখানে সিম্পল রাখা হলো)
             deleted = db.query(models.MarketData).filter(
                 models.MarketData.timeframe == tf,
                 models.MarketData.timestamp < cutoff_date
             ).delete(synchronize_session=False)
-            
             if deleted > 0:
-                print(f"Deleted {deleted} old candles for timeframe {tf} (older than {days} days)")
                 total_deleted += deleted
-                
         db.commit()
         return total_deleted
