@@ -5,6 +5,7 @@ import asyncio
 import json
 import random  # ডামি ডাটার জন্য, প্রোডাকশনে CCXT Pro ব্যবহার করবেন
 from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime, timedelta
@@ -609,19 +610,37 @@ def get_download_status(task_id: str):
     return {"status": task_result.state}
 
 # --- Data Conversion Endpoint ---
+
+class ConversionRequest(BaseModel):
+    filename: str
+
+@app.get("/api/v1/list-trade-files")
+def list_trade_files():
+    target_dir = DATA_FEED_DIR
+    if not os.path.exists(target_dir):
+        return []
+    
+    # শুধু trades_ দিয়ে শুরু এবং .csv দিয়ে শেষ হওয়া ফাইলগুলো লিস্ট করবে
+    files = [f for f in os.listdir(target_dir) if f.startswith("trades_") and f.endswith(".csv")]
+    return files
 @app.post("/api/v1/convert-data")
-async def run_data_conversion():
+async def run_data_conversion(request: ConversionRequest): # এখানে request প্যারামিটার যোগ করা হয়েছে
     try:
         target_dir = DATA_FEED_DIR 
-        
         if not os.path.exists(target_dir):
             return {"message": "Data directory not found.", "success": False}
 
-        # ফাইল খোঁজা
-        files = [f for f in os.listdir(target_dir) if f.startswith("trades_") and f.endswith(".csv")]
+        file_to_convert = request.filename
         
-        if not files:
-            return {"message": "No 'trades_*.csv' files found to convert.", "success": False}
+        # যদি ইউজার "All Files" সিলেক্ট করে বা কিছু না দেয় (অপশনাল)
+        if file_to_convert == "all":
+             files = [f for f in os.listdir(target_dir) if f.startswith("trades_") and f.endswith(".csv")]
+        else:
+             # নির্দিষ্ট ফাইল চেক করা
+             file_path = os.path.join(target_dir, file_to_convert)
+             if not os.path.exists(file_path):
+                 raise HTTPException(status_code=404, detail=f"File '{file_to_convert}' not found.")
+             files = [file_to_convert]
 
         converted_count = 0
         
@@ -637,23 +656,18 @@ async def run_data_conversion():
             timeframe = '1min' 
             ohlc = df['price'].resample(timeframe).ohlc()
             volume = df['amount'].resample(timeframe).sum()
-            
-            # 👇👇 ফিক্স: ভলিউম সিরিজটির নাম ঠিক করে দেওয়া 👇👇
             volume.name = 'volume' 
 
-            # এবার ওহএলসি (OHLC) এর সাথে ভলিউম যোগ করা
             candles = pd.concat([ohlc, volume], axis=1)
 
-            # নাল ভ্যালু ফিক্স করা
+            # ফিক্স
             candles['close'] = candles['close'].ffill()
             candles['open'] = candles['open'].fillna(candles['close'])
             candles['high'] = candles['high'].fillna(candles['close'])
             candles['low'] = candles['low'].fillna(candles['close'])
-            
-            # এখন 'volume' কলামটি সঠিকভাবে পাওয়া যাবে
             candles['volume'] = candles['volume'].fillna(0)
 
-            # সেভ করা
+            # সেভ
             output_filename = trade_file.replace('trades_', f'candles_{timeframe}_')
             output_path = os.path.join(target_dir, output_filename)
             
@@ -662,13 +676,11 @@ async def run_data_conversion():
             converted_count += 1
 
         return {
-            "message": f"Successfully converted {converted_count} files to candles!", 
-            "success": True,
-            "converted_files": converted_count
+            "message": f"Successfully converted: {files}", 
+            "success": True
         }
 
     except Exception as e:
         print(f"❌ Conversion Error: {e}")
-        # ক্লায়েন্টকে বিস্তারিত এরর মেসেজ পাঠানো
         raise HTTPException(status_code=500, detail=f"Conversion Error: {str(e)}")
 

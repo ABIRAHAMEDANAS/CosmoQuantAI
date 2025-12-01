@@ -32,7 +32,7 @@ def print_pretty_result(result):
 
 # টাস্কটি ব্যাকগ্রাউন্ডে রান হবে
 @celery_app.task(bind=True)
-def run_backtest_task(self, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, custom_data_file: str = None):
+def run_backtest_task(self, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, custom_data_file: str = None, commission: float = 0.001, slippage: float = 0.0):
     db = SessionLocal()
     engine = BacktestEngine()
     
@@ -59,7 +59,9 @@ def run_backtest_task(self, symbol: str, timeframe: str, strategy_name: str, ini
             start_date=start_date,
             end_date=end_date,
             custom_data_file=custom_data_file,
-            progress_callback=on_progress 
+            progress_callback=on_progress,
+            commission=commission,
+            slippage=slippage
         )
         print_pretty_result(result)
         return result
@@ -71,7 +73,7 @@ def run_backtest_task(self, symbol: str, timeframe: str, strategy_name: str, ini
         db.close()
 
 @celery_app.task(bind=True)
-def run_optimization_task(self, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, method="grid", population_size=50, generations=10):
+def run_optimization_task(self, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, method="grid", population_size=50, generations=10, commission: float = 0.001, slippage: float = 0.0):
     db = SessionLocal()
     engine = BacktestEngine()
     
@@ -118,7 +120,9 @@ def run_optimization_task(self, symbol: str, timeframe: str, strategy_name: str,
             population_size=population_size,
             generations=generations,
             progress_callback=on_progress,
-            abort_callback=check_abort 
+            abort_callback=check_abort,
+            commission=commission,
+            slippage=slippage
         )
         
         try:
@@ -134,7 +138,6 @@ def run_optimization_task(self, symbol: str, timeframe: str, strategy_name: str,
         
     finally:
         db.close()
-
 import ccxt
 import os
 import csv

@@ -55,7 +55,9 @@ const parseParamsFromCode = (code: string): Record<string, any> => {
 };
 
 // ✅ Helper to calculate simple drawdown from candle closes (Proxy for Equity)
+// ✅ Helper to calculate simple drawdown from candle closes (Proxy for Equity)
 const calculateDrawdownFromCandles = (candles: any[]) => {
+    if (!candles || !Array.isArray(candles) || candles.length === 0) return [];
     let peak = -Infinity;
     return candles.map(c => {
         if (c.close > peak) peak = c.close;
@@ -285,31 +287,33 @@ const Backtester: React.FC = () => {
 
     // ✅ Data Conversion Handler
     const [isConverting, setIsConverting] = useState(false);
+    const [tradeFiles, setTradeFiles] = useState<string[]>([]);
+    const [selectedTradeFile, setSelectedTradeFile] = useState<string>("");
 
     const handleConvertTradesToCandles = async () => {
+        if (!selectedTradeFile) {
+            showToast("⚠️ Please select a trade file first!", "warning");
+            return;
+        }
+
         setIsConverting(true);
         try {
-            // Using fetch directly as per user request, but could be moved to service later
             const response = await fetch('http://localhost:8000/api/v1/convert-data', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: selectedTradeFile }), // ⭐ ফাইলের নাম পাঠানো হচ্ছে
             });
 
             if (response.ok) {
-                const data = await response.json();
-                if (data.status === 'success' || data.status === 'partial_success') {
-                    showToast(`Conversion Successful! ${data.converted_files.length} files generated.`, 'success');
-                } else {
-                    showToast(data.message || "Conversion failed", "warning");
-                }
+                showToast(`✅ Successfully converted: ${selectedTradeFile}`, 'success');
+                refreshTradeFiles(); // লিস্ট রিফ্রেশ (অপশনাল)
             } else {
-                showToast("Failed to convert data.", "error");
+                const errorData = await response.json();
+                showToast(`❌ Conversion Failed: ${errorData.detail}`, 'error');
             }
         } catch (error) {
-            console.error("Error converting data:", error);
-            showToast("Error converting data.", "error");
+            console.error("Conversion error:", error);
+            showToast("❌ Error connecting to server.", 'error');
         } finally {
             setIsConverting(false);
         }
@@ -417,6 +421,28 @@ const Backtester: React.FC = () => {
             }
         }
     };
+
+    // নতুন ফাংশন: ফাইল লিস্ট রিফ্রেশ করার জন্য
+    const refreshTradeFiles = async () => {
+        try {
+            const res = await fetch('http://localhost:8000/api/v1/list-trade-files');
+            if (res.ok) {
+                const files = await res.json();
+                setTradeFiles(files);
+                // যদি আগে কিছু সিলেক্ট করা না থাকে, তবে প্রথমটি সিলেক্ট করো
+                if (files.length > 0 && !selectedTradeFile) {
+                    setSelectedTradeFile(files[0]);
+                }
+            }
+        } catch (error) {
+            console.error("Failed to fetch trade files", error);
+        }
+    };
+
+    // পেজ লোড হওয়ার সাথে সাথে লিস্ট আনো
+    useEffect(() => {
+        refreshTradeFiles();
+    }, []);
 
     // Initial Data Fetching
     useEffect(() => {
@@ -752,6 +778,14 @@ const Backtester: React.FC = () => {
                         setProgress(statusRes.percent || 0);
                     } else if (statusRes.status === 'Completed') {
                         clearInterval(interval);
+
+                        // ✅ Error Handling for Backend Logic Errors
+                        if (statusRes.result?.status === 'error' || statusRes.result?.error) {
+                            setIsRunning(false);
+                            showToast(`Backtest Failed: ${statusRes.result.message || statusRes.result.error}`, 'error');
+                            return;
+                        }
+
                         setBacktestResult(statusRes.result); // রেজাল্ট সেট করা
                         setSingleResult(statusRes.result); // For Chart
                         setIsRunning(false);
@@ -1079,6 +1113,20 @@ const Backtester: React.FC = () => {
                                             <Button variant="outline" onClick={() => dataFileInputRef.current?.click()} className="w-full h-10 border-dashed border-2 flex items-center justify-center gap-2">
                                                 <UploadCloud size={16} /> {isUploadingData ? 'Uploading...' : 'Choose CSV File'}
                                             </Button>
+                                            {/* 👇 ফাইল সিলেকশন ড্রপডাউন 👇 */}
+                                            <select
+                                                className="bg-gray-800 border border-gray-600 text-white text-sm rounded px-2 py-1 mr-2 outline-none focus:border-yellow-400"
+                                                value={selectedTradeFile}
+                                                onChange={(e) => setSelectedTradeFile(e.target.value)}
+                                            >
+                                                <option value="" disabled>Select File</option>
+                                                {tradeFiles.length === 0 && <option disabled>No files found</option>}
+                                                {tradeFiles.map((file, index) => (
+                                                    <option key={index} value={file}>{file}</option>
+                                                ))}
+                                                <option value="all">Convert All Files</option>
+                                            </select>
+
                                             <Button
                                                 variant="secondary"
                                                 className="flex items-center gap-2 border-gray-600 hover:bg-gray-700 hover:text-yellow-400 transition-colors"
@@ -1235,10 +1283,16 @@ const Backtester: React.FC = () => {
                                 <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg p-1">
                                     {/* Main Price Chart */}
                                     <div className="h-[450px]">
-                                        <BacktestChart
-                                            data={singleResult.candle_data}
-                                            trades={singleResult.trades_log || []}
-                                        />
+                                        {singleResult.candle_data && singleResult.candle_data.length > 0 ? (
+                                            <BacktestChart
+                                                data={singleResult.candle_data}
+                                                trades={singleResult.trades_log || []}
+                                            />
+                                        ) : (
+                                            <div className="flex items-center justify-center h-full text-gray-500">
+                                                No Candle Data Available
+                                            </div>
+                                        )}
                                     </div>
 
                                     {/* NEW: Underwater Drawdown Chart */}
