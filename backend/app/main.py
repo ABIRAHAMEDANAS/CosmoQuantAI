@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from app.services.websocket_manager import manager
 import asyncio
 import json
@@ -10,6 +11,7 @@ from datetime import datetime, timedelta
 import os
 import shutil
 import os
+import pandas as pd
 
 DATA_FEED_DIR = "app/data_feeds"
 os.makedirs(DATA_FEED_DIR, exist_ok=True)
@@ -24,6 +26,7 @@ from .utils import get_redis_client
 from .services.market_service import MarketService
 from .services.backtest_engine import BacktestEngine
 from .services import ai_service
+from .services.data_processing import convert_trades_to_candles_logic
 from celery.result import AsyncResult
 from .tasks import run_backtest_task, run_optimization_task, download_candles_task, download_trades_task
 from .celery_app import celery_app
@@ -47,6 +50,23 @@ app = FastAPI(
         "mobile": "01931645993"
     }
 )
+
+# 👇👇 এই অংশটুকু যোগ করুন 👇👇
+origins = [
+    "http://localhost:3000",      # React Frontend
+    "http://localhost:5173",      # Vite (Alternative)
+    "http://127.0.0.1:3000",
+    "*"                           # ডেভেলপমেন্টের জন্য সব এলাউ করতে পারেন (অপশনাল)
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+# 👆👆 এই পর্যন্ত 👆👆
 
 # ✅ ১. কাস্টম লগ ফিল্টার ক্লাস
 class EndpointFilter(logging.Filter):
@@ -587,3 +607,68 @@ def get_download_status(task_id: str):
     elif task_result.state == 'FAILURE':
         return {"status": "Failed", "error": str(task_result.result)}
     return {"status": task_result.state}
+
+# --- Data Conversion Endpoint ---
+@app.post("/api/v1/convert-data")
+async def run_data_conversion():
+    try:
+        target_dir = DATA_FEED_DIR 
+        
+        if not os.path.exists(target_dir):
+            return {"message": "Data directory not found.", "success": False}
+
+        # ফাইল খোঁজা
+        files = [f for f in os.listdir(target_dir) if f.startswith("trades_") and f.endswith(".csv")]
+        
+        if not files:
+            return {"message": "No 'trades_*.csv' files found to convert.", "success": False}
+
+        converted_count = 0
+        
+        for trade_file in files:
+            file_path = os.path.join(target_dir, trade_file)
+            
+            # ডাটা রিড
+            df = pd.read_csv(file_path, usecols=['datetime', 'price', 'amount'])
+            df['datetime'] = pd.to_datetime(df['datetime'])
+            df.set_index('datetime', inplace=True)
+
+            # রিস্যাম্পলিং
+            timeframe = '1min' 
+            ohlc = df['price'].resample(timeframe).ohlc()
+            volume = df['amount'].resample(timeframe).sum()
+            
+            # 👇👇 ফিক্স: ভলিউম সিরিজটির নাম ঠিক করে দেওয়া 👇👇
+            volume.name = 'volume' 
+
+            # এবার ওহএলসি (OHLC) এর সাথে ভলিউম যোগ করা
+            candles = pd.concat([ohlc, volume], axis=1)
+
+            # নাল ভ্যালু ফিক্স করা
+            candles['close'] = candles['close'].ffill()
+            candles['open'] = candles['open'].fillna(candles['close'])
+            candles['high'] = candles['high'].fillna(candles['close'])
+            candles['low'] = candles['low'].fillna(candles['close'])
+            
+            # এখন 'volume' কলামটি সঠিকভাবে পাওয়া যাবে
+            candles['volume'] = candles['volume'].fillna(0)
+
+            # সেভ করা
+            output_filename = trade_file.replace('trades_', f'candles_{timeframe}_')
+            output_path = os.path.join(target_dir, output_filename)
+            
+            candles.reset_index(inplace=True)
+            candles.to_csv(output_path, index=False)
+            converted_count += 1
+
+        return {
+            "message": f"Successfully converted {converted_count} files to candles!", 
+            "success": True,
+            "converted_files": converted_count
+        }
+
+    except Exception as e:
+        print(f"❌ Conversion Error: {e}")
+        # ক্লায়েন্টকে বিস্তারিত এরর মেসেজ পাঠানো
+        raise HTTPException(status_code=500, detail=f"Conversion Error: {str(e)}")
+

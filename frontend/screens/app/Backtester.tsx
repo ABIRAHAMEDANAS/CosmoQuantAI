@@ -283,6 +283,39 @@ const Backtester: React.FC = () => {
     const [downloadProgress, setDownloadProgress] = useState(0);
     const [activeTaskId, setActiveTaskId] = useState<string | null>(null); // ✅ টাস্ক আইডি ট্র্যাক করার জন্য
 
+    // ✅ Data Conversion Handler
+    const [isConverting, setIsConverting] = useState(false);
+
+    const handleConvertTradesToCandles = async () => {
+        setIsConverting(true);
+        try {
+            // Using fetch directly as per user request, but could be moved to service later
+            const response = await fetch('http://localhost:8000/api/v1/convert-data', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.status === 'success' || data.status === 'partial_success') {
+                    showToast(`Conversion Successful! ${data.converted_files.length} files generated.`, 'success');
+                } else {
+                    showToast(data.message || "Conversion failed", "warning");
+                }
+            } else {
+                showToast("Failed to convert data.", "error");
+            }
+        } catch (error) {
+            console.error("Error converting data:", error);
+            showToast("Error converting data.", "error");
+        } finally {
+            setIsConverting(false);
+        }
+    };
+
+
     // ✅ ১. ডাউনলোড হ্যান্ডলার (Start)
     const handleStartDownload = async () => {
         setIsDownloading(true);
@@ -900,475 +933,498 @@ const Backtester: React.FC = () => {
             </div>
 
             {/* TAB CONTENT: AI STRATEGY LAB */}
-            {activeTab === 'editor' && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
-                    {/* Left: Idea Input */}
-                    <div className="lg:col-span-1 space-y-6">
-                        <Card className="h-full flex flex-col">
-                            <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
-                                <AIFoundryIcon className="text-purple-500" /> Idea to Strategy
-                            </h2>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                                Describe your trading logic in plain English. AI will generate the Python code for you.
-                            </p>
-                            <textarea
-                                value={aiPrompt}
-                                onChange={(e) => setAiPrompt(e.target.value)}
-                                placeholder="e.g. Buy when RSI(14) crosses above 30 and price is above SMA(200). Sell when RSI crosses below 70."
-                                className="flex-1 w-full bg-gray-100 dark:bg-brand-dark/50 border border-brand-border-light dark:border-brand-border-dark rounded-lg p-4 text-slate-900 dark:text-white focus:ring-brand-primary focus:border-brand-primary resize-none mb-4 min-h-[200px]"
-                            />
-                            <Button
-                                onClick={handleAiGenerate}
-                                disabled={isGenerating}
-                                className="w-full bg-gradient-to-r from-purple-600 to-pink-600 border-none hover:opacity-90"
-                            >
-                                {isGenerating ? 'Generating...' : 'Generate Code'}
-                            </Button>
-                        </Card>
-
-                        <Card>
-                            <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Upload Strategy</h2>
-                            <div className="flex flex-col gap-3">
-                                <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".py" />
-                                <div className="flex gap-2">
-                                    <Button variant="secondary" onClick={() => fileInputRef.current?.click()} className="flex-1">Choose File</Button>
-                                    <Button onClick={handleUpload} disabled={!fileName}>Upload</Button>
-                                </div>
-                                <span className="text-xs text-center text-gray-400">{fileName || 'No file chosen'}</span>
-                            </div>
-                        </Card>
-                    </div>
-
-                    {/* Right: Code Editor */}
-                    <div className="lg:col-span-2">
-                        <div className="bg-[#1e1e1e] rounded-lg border border-gray-700 overflow-hidden h-[600px] flex flex-col">
-                            <div className="bg-[#252526] px-4 py-2 border-b border-gray-700 flex justify-between items-center">
-                                <span className="text-sm text-gray-300 font-mono flex items-center gap-2">
-                                    <CodeIcon /> {strategy}.py
-                                </span>
-                                <Button size="sm" variant="outline" className="h-7 text-xs flex items-center gap-1 border-gray-600 text-gray-300">
-                                    <SaveIcon /> Save
-                                </Button>
-                            </div>
-                            <div className="flex-1 relative">
-                                <CodeEditor
-                                    value={currentStrategyCode}
-                                    onChange={setCurrentStrategyCode}
-                                    language="python"
+            {
+                activeTab === 'editor' && (
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
+                        {/* Left: Idea Input */}
+                        <div className="lg:col-span-1 space-y-6">
+                            <Card className="h-full flex flex-col">
+                                <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+                                    <AIFoundryIcon className="text-purple-500" /> Idea to Strategy
+                                </h2>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                                    Describe your trading logic in plain English. AI will generate the Python code for you.
+                                </p>
+                                <textarea
+                                    value={aiPrompt}
+                                    onChange={(e) => setAiPrompt(e.target.value)}
+                                    placeholder="e.g. Buy when RSI(14) crosses above 30 and price is above SMA(200). Sell when RSI crosses below 70."
+                                    className="flex-1 w-full bg-gray-100 dark:bg-brand-dark/50 border border-brand-border-light dark:border-brand-border-dark rounded-lg p-4 text-slate-900 dark:text-white focus:ring-brand-primary focus:border-brand-primary resize-none mb-4 min-h-[200px]"
                                 />
+                                <Button
+                                    onClick={handleAiGenerate}
+                                    disabled={isGenerating}
+                                    className="w-full bg-gradient-to-r from-purple-600 to-pink-600 border-none hover:opacity-90"
+                                >
+                                    {isGenerating ? 'Generating...' : 'Generate Code'}
+                                </Button>
+                            </Card>
+
+                            <Card>
+                                <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Upload Strategy</h2>
+                                <div className="flex flex-col gap-3">
+                                    <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".py" />
+                                    <div className="flex gap-2">
+                                        <Button variant="secondary" onClick={() => fileInputRef.current?.click()} className="flex-1">Choose File</Button>
+                                        <Button onClick={handleUpload} disabled={!fileName}>Upload</Button>
+                                    </div>
+                                    <span className="text-xs text-center text-gray-400">{fileName || 'No file chosen'}</span>
+                                </div>
+                            </Card>
+                        </div>
+
+                        {/* Right: Code Editor */}
+                        <div className="lg:col-span-2">
+                            <div className="bg-[#1e1e1e] rounded-lg border border-gray-700 overflow-hidden h-[600px] flex flex-col">
+                                <div className="bg-[#252526] px-4 py-2 border-b border-gray-700 flex justify-between items-center">
+                                    <span className="text-sm text-gray-300 font-mono flex items-center gap-2">
+                                        <CodeIcon /> {strategy}.py
+                                    </span>
+                                    <Button size="sm" variant="outline" className="h-7 text-xs flex items-center gap-1 border-gray-600 text-gray-300">
+                                        <SaveIcon /> Save
+                                    </Button>
+                                </div>
+                                <div className="flex-1 relative">
+                                    <CodeEditor
+                                        value={currentStrategyCode}
+                                        onChange={setCurrentStrategyCode}
+                                        language="python"
+                                    />
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* TAB CONTENT: BACKTEST ENGINE */}
-            {activeTab === 'backtest' && (
-                <>
-                    <Card className="staggered-fade-in" style={{ animationDelay: '200ms' }}>
-                        <div className="flex items-center justify-between mb-6">
-                            <h2 className="text-xl font-bold text-slate-900 dark:text-white">Backtest Configuration</h2>
+            {
+                activeTab === 'backtest' && (
+                    <>
+                        <Card className="staggered-fade-in" style={{ animationDelay: '200ms' }}>
+                            <div className="flex items-center justify-between mb-6">
+                                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Backtest Configuration</h2>
 
-                            {/* ✅ Mode Switcher */}
-                            <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
-                                <button
-                                    onClick={() => setBacktestMode('single')}
-                                    className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${backtestMode === 'single' ? 'bg-white dark:bg-brand-primary text-slate-900 dark:text-white shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
-                                >
-                                    Single Backtest
-                                </button>
-                                <button
-                                    onClick={() => setBacktestMode('optimization')}
-                                    className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${backtestMode === 'optimization' ? 'bg-white dark:bg-brand-primary text-slate-900 dark:text-white shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
-                                >
-                                    AI Optimization
-                                </button>
-                            </div>
-
-                            <Button variant="secondary" onClick={handleSyncData} disabled={isSyncing}>
-                                {isSyncing ? "Syncing..." : "☁ Sync Data"}
-                            </Button>
-                        </div>
-
-                        {/* ✅ ডাটা সোর্স টগল */}
-                        <div className="mb-6 border-b border-gray-200 pb-4">
-                            <label className="text-sm font-semibold text-gray-500 mb-2 block">1. Select Data Source</label>
-                            <div className="flex gap-4">
-                                <button
-                                    onClick={() => setDataSource('database')}
-                                    className={`flex items-center gap-2 px-4 py-3 border rounded-lg transition-all ${dataSource === 'database' ? 'border-brand-primary bg-brand-primary/5 ring-2 ring-brand-primary/20' : 'border-gray-200 hover:bg-gray-50'}`}
-                                >
-                                    <span className="text-lg">🗄️</span>
-                                    <div className="text-left">
-                                        <div className="font-semibold text-sm">Exchange Database</div>
-                                        <div className="text-xs text-gray-500">Sync from Binance/Bybit</div>
-                                    </div>
-                                </button>
-
-                                <button
-                                    onClick={() => setDataSource('csv')}
-                                    className={`flex items-center gap-2 px-4 py-3 border rounded-lg transition-all ${dataSource === 'csv' ? 'border-brand-primary bg-brand-primary/5 ring-2 ring-brand-primary/20' : 'border-gray-200 hover:bg-gray-50'}`}
-                                >
-                                    <span className="text-lg">📂</span>
-                                    <div className="text-left">
-                                        <div className="font-semibold text-sm">Upload CSV File</div>
-                                        <div className="text-xs text-gray-500">Use your own data (OHLCV)</div>
-                                    </div>
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                            {/* ✅ কন্ডিশনাল রেন্ডারিং: ডাটাবেস মোড */}
-                            {dataSource === 'database' && (
-                                <>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-500 mb-1">Exchange</label>
-                                        <select className={inputBaseClasses} value={selectedExchange} onChange={(e) => setSelectedExchange(e.target.value)}>
-                                            {exchanges.map(ex => <option key={ex} value={ex}>{ex.toUpperCase()}</option>)}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <SearchableSelect label="Market Pair" options={markets} value={symbol} onChange={setSymbol} />
-                                    </div>
-                                </>
-                            )}
-
-                            {/* ✅ কন্ডিশনাল রেন্ডারিং: CSV মোড */}
-                            {dataSource === 'csv' && (
-                                <div className="col-span-2">
-                                    <label className="block text-sm font-medium text-gray-500 mb-1">Upload Data File (CSV)</label>
-                                    <div className="flex gap-2">
-                                        <input type="file" ref={dataFileInputRef} onChange={handleDataFileUpload} className="hidden" accept=".csv" />
-                                        <Button variant="outline" onClick={() => dataFileInputRef.current?.click()} className="w-full h-10 border-dashed border-2 flex items-center justify-center gap-2">
-                                            <UploadCloud size={16} /> {isUploadingData ? 'Uploading...' : 'Choose CSV File'}
-                                        </Button>
-                                    </div>
-                                    {csvFileName && <p className="text-xs text-green-600 mt-1">✅ Selected: {csvFileName}</p>}
-                                </div>
-                            )}
-
-                            {/* কমন ফিল্ডস */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-500 mb-1">Timeframe</label>
-                                <select className={inputBaseClasses} value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
-                                    {TIMEFRAME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-                                </select>
-                            </div>
-                        </div>
-
-                        {/* অন্যান্য প্যারামিটার */}
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-                            <div className="md:col-span-2">
-                                <label className="block text-sm font-medium text-gray-500 mb-1">Strategy</label>
-                                <select className={inputBaseClasses} value={strategy} onChange={(e) => setStrategy(e.target.value)}>
-                                    <optgroup label="Standard"><option value="RSI Crossover">RSI Crossover</option></optgroup>
-                                    {customStrategies.length > 0 && <optgroup label="Custom">{customStrategies.map(s => <option key={s} value={s}>{s}</option>)}</optgroup>}
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-500 mb-1">Start Date</label>
-                                <DatePicker selected={startDate ? new Date(startDate) : null} onChange={(date: Date | null) => setStartDate(date ? date.toISOString().split('T')[0] : '')} className={inputBaseClasses} />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-500 mb-1">End Date</label>
-                                <DatePicker selected={endDate ? new Date(endDate) : null} onChange={(date: Date | null) => setEndDate(date ? date.toISOString().split('T')[0] : '')} className={inputBaseClasses} />
-                            </div>
-                        </div>
-
-                        {/* ✅ Execution Realism UI */}
-                        <div className="mt-6 pt-4 border-t border-brand-border-light dark:border-brand-border-dark">
-                            <div className="flex items-center gap-2 mb-4">
-                                <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                                    Execution Realism (Fees & Slippage)
-                                </h3>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                {/* Commission Input */}
-                                <div className="relative">
-                                    <label className="block text-xs font-medium text-gray-500 mb-1">
-                                        Trading Fee (Commission)
-                                    </label>
-                                    <div className="flex items-center">
-                                        <input
-                                            type="number"
-                                            step="0.0001"
-                                            value={commission}
-                                            onChange={(e) => setCommission(parseFloat(e.target.value))}
-                                            className="w-full bg-white dark:bg-brand-dark/50 border border-brand-border-light dark:border-brand-border-dark rounded-l-md p-2 text-sm text-slate-900 dark:text-white focus:ring-brand-primary focus:border-brand-primary"
-                                        />
-                                        <span className="bg-gray-100 dark:bg-gray-800 border border-l-0 border-brand-border-light dark:border-brand-border-dark rounded-r-md px-3 py-2 text-xs text-gray-500">
-                                            {(commission * 100).toFixed(2)}%
-                                        </span>
-                                    </div>
-                                </div>
-
-                                {/* Slippage Input */}
-                                <div className="relative">
-                                    <label className="block text-xs font-medium text-gray-500 mb-1">
-                                        Slippage Model
-                                    </label>
-                                    <div className="flex items-center">
-                                        <input
-                                            type="number"
-                                            step="0.0001"
-                                            value={slippage}
-                                            onChange={(e) => setSlippage(parseFloat(e.target.value))}
-                                            className="w-full bg-white dark:bg-brand-dark/50 border border-brand-border-light dark:border-brand-border-dark rounded-l-md p-2 text-sm text-slate-900 dark:text-white focus:ring-brand-primary focus:border-brand-primary"
-                                        />
-                                        <span className="bg-gray-100 dark:bg-gray-800 border border-l-0 border-brand-border-light dark:border-brand-border-dark rounded-r-md px-3 py-2 text-xs text-gray-500">
-                                            {(slippage * 100).toFixed(2)}%
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {backtestMode === 'single' ? renderSingleParams() : renderOptimizationParams()}
-
-                        <div className="mt-8 pt-6 border-t border-brand-border-light dark:border-brand-border-dark flex items-center gap-4">
-                            <Button onClick={handleRunBacktest} className="w-full md:w-auto" disabled={isContextLoading || isLoading || isSyncing || isOptimizing || isBatchRunning}>
-                                {isContextLoading ? 'Processing...' : isOptimizing ? 'Optimizing...' : backtestMode === 'single' ? 'Run Backtest' : 'Run Optimization'}
-                            </Button>
-                            <Button variant="secondary" onClick={handleRunAllStrategies} disabled={isOptimizing || isBatchRunning}>
-                                Run All Strategies
-                            </Button>
-                        </div>
-                    </Card>
-
-                    {/* SINGLE BACKTEST PROGRESS */}
-                    {isRunning && (
-                        <Card className="mt-6 border border-blue-500/20 bg-blue-500/5 animate-fade-in">
-                            <div className="flex flex-col justify-center items-center py-12">
-                                {/* Circular Loader */}
-                                <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-
-                                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Running Strategy...</h2>
-                                <p className="text-blue-500 font-mono text-lg mt-2">{progress}% Completed</p>
-
-                                {/* Linear Progress */}
-                                <div className="w-64 h-2 bg-gray-200 dark:bg-gray-700 rounded-full mt-4 overflow-hidden">
-                                    <div
-                                        className="h-full bg-blue-500 transition-all duration-300 ease-out"
-                                        style={{ width: `${progress}%` }}
-                                    ></div>
-                                </div>
-                            </div>
-                        </Card>
-                    )}
-
-                    {/* RESULTS SECTION */}
-                    {isOptimizing && (
-                        <Card className="mt-6 border border-brand-primary/20 bg-brand-primary/5">
-                            <div className="flex justify-between items-center mb-4">
-                                <h2 className="text-xl font-bold flex items-center gap-2">Optimization in Progress...</h2>
-                                <Button variant="outline" className="text-red-500 border-red-500 h-8 px-3" onClick={handleStopOptimization}>Stop</Button>
-                            </div>
-                            <div className="w-full bg-gray-200 rounded-full h-4 dark:bg-gray-700 overflow-hidden relative">
-                                <div className="bg-brand-primary h-4 rounded-full transition-all duration-500" style={{ width: `${optimizationProgress}%` }}></div>
-                            </div>
-                        </Card>
-                    )}
-
-                    {/* --- TRADINGVIEW STYLE RESULTS SECTION --- */}
-                    {showResults && singleResult && !isOptimizing && (
-                        <div className="animate-fade-in space-y-6 mt-6">
-
-                            {/* A. Chart Section */}
-                            {/* A. Main Chart Section */}
-                            <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg p-1">
-                                {/* Main Price Chart */}
-                                <div className="h-[450px]">
-                                    <BacktestChart
-                                        data={singleResult.candle_data}
-                                        trades={singleResult.trades_log || []}
-                                    />
-                                </div>
-
-                                {/* NEW: Underwater Drawdown Chart */}
-                                <div className="h-[200px] border-t border-[#2A2E39] mt-1">
-                                    <UnderwaterChart
-                                        data={singleResult.underwater_data || calculateDrawdownFromCandles(singleResult.candle_data)}
-                                        height={200}
-                                    />
-                                </div>
-                            </div>
-
-                            {/* B. Performance Summary Panel */}
-                            <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg">
-                                {/* Header Tabs */}
-                                <div className="flex border-b border-[#2A2E39] px-4 bg-[#1e222d]">
-                                    <button className="px-4 py-3 text-sm font-medium text-[#2962FF] border-b-2 border-[#2962FF] hover:bg-[#2A2E39] transition-colors">
-                                        Overview
+                                {/* ✅ Mode Switcher */}
+                                <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+                                    <button
+                                        onClick={() => setBacktestMode('single')}
+                                        className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${backtestMode === 'single' ? 'bg-white dark:bg-brand-primary text-slate-900 dark:text-white shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+                                    >
+                                        Single Backtest
                                     </button>
-                                    <button className="px-4 py-3 text-sm font-medium text-gray-400 hover:text-gray-200 hover:bg-[#2A2E39] transition-colors">
-                                        Performance Summary
-                                    </button>
-                                    <button className="px-4 py-3 text-sm font-medium text-gray-400 hover:text-gray-200 hover:bg-[#2A2E39] transition-colors">
-                                        List of Trades
+                                    <button
+                                        onClick={() => setBacktestMode('optimization')}
+                                        className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${backtestMode === 'optimization' ? 'bg-white dark:bg-brand-primary text-slate-900 dark:text-white shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+                                    >
+                                        AI Optimization
                                     </button>
                                 </div>
 
-                                {/* Metrics Grid */}
-                                <div className="p-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
+                                <Button variant="secondary" onClick={handleSyncData} disabled={isSyncing}>
+                                    {isSyncing ? "Syncing..." : "☁ Sync Data"}
+                                </Button>
+                            </div>
 
-                                    {/* 1. Net Profit */}
-                                    <div className="flex flex-col">
-                                        <span className="text-xs text-gray-400 mb-1">Net Profit</span>
-                                        <div className="flex items-baseline gap-2">
-                                            <span className={`text-xl font-bold font-mono ${singleResult.profitPercent && singleResult.profitPercent >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
-                                                {singleResult.profitPercent && singleResult.profitPercent >= 0 ? '+' : ''}
-                                                ${((singleResult.final_value || 0) - (singleResult.initial_cash || 10000)).toFixed(2)}
-                                            </span>
-                                            <span className={`text-xs ${singleResult.profitPercent && singleResult.profitPercent >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
-                                                ({singleResult.profitPercent}%)
+                            {/* ✅ ডাটা সোর্স টগল */}
+                            <div className="mb-6 border-b border-gray-200 pb-4">
+                                <label className="text-sm font-semibold text-gray-500 mb-2 block">1. Select Data Source</label>
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={() => setDataSource('database')}
+                                        className={`flex items-center gap-2 px-4 py-3 border rounded-lg transition-all ${dataSource === 'database' ? 'border-brand-primary bg-brand-primary/5 ring-2 ring-brand-primary/20' : 'border-gray-200 hover:bg-gray-50'}`}
+                                    >
+                                        <span className="text-lg">🗄️</span>
+                                        <div className="text-left">
+                                            <div className="font-semibold text-sm">Exchange Database</div>
+                                            <div className="text-xs text-gray-500">Sync from Binance/Bybit</div>
+                                        </div>
+                                    </button>
+
+                                    <button
+                                        onClick={() => setDataSource('csv')}
+                                        className={`flex items-center gap-2 px-4 py-3 border rounded-lg transition-all ${dataSource === 'csv' ? 'border-brand-primary bg-brand-primary/5 ring-2 ring-brand-primary/20' : 'border-gray-200 hover:bg-gray-50'}`}
+                                    >
+                                        <span className="text-lg">📂</span>
+                                        <div className="text-left">
+                                            <div className="font-semibold text-sm">Upload CSV File</div>
+                                            <div className="text-xs text-gray-500">Use your own data (OHLCV)</div>
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                                {/* ✅ কন্ডিশনাল রেন্ডারিং: ডাটাবেস মোড */}
+                                {dataSource === 'database' && (
+                                    <>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-500 mb-1">Exchange</label>
+                                            <select className={inputBaseClasses} value={selectedExchange} onChange={(e) => setSelectedExchange(e.target.value)}>
+                                                {exchanges.map(ex => <option key={ex} value={ex}>{ex.toUpperCase()}</option>)}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <SearchableSelect label="Market Pair" options={markets} value={symbol} onChange={setSymbol} />
+                                        </div>
+                                    </>
+                                )}
+
+                                {/* ✅ কন্ডিশনাল রেন্ডারিং: CSV মোড */}
+                                {dataSource === 'csv' && (
+                                    <div className="col-span-2">
+                                        <label className="block text-sm font-medium text-gray-500 mb-1">Upload Data File (CSV)</label>
+                                        <div className="flex gap-2">
+                                            <input type="file" ref={dataFileInputRef} onChange={handleDataFileUpload} className="hidden" accept=".csv" />
+                                            <Button variant="outline" onClick={() => dataFileInputRef.current?.click()} className="w-full h-10 border-dashed border-2 flex items-center justify-center gap-2">
+                                                <UploadCloud size={16} /> {isUploadingData ? 'Uploading...' : 'Choose CSV File'}
+                                            </Button>
+                                            <Button
+                                                variant="secondary"
+                                                className="flex items-center gap-2 border-gray-600 hover:bg-gray-700 hover:text-yellow-400 transition-colors"
+                                                onClick={handleConvertTradesToCandles}
+                                                disabled={isConverting}
+                                                title="Convert uploaded trades to candle data"
+                                            >
+                                                {isConverting ? (
+                                                    <svg className="animate-spin w-4 h-4 text-yellow-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                    </svg>
+                                                ) : (
+                                                    <svg className="w-4 h-4 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                                                    </svg>
+                                                )}
+                                                <span>{isConverting ? "Processing..." : "Convert"}</span>
+                                            </Button>
+                                        </div>
+                                        {csvFileName && <p className="text-xs text-green-600 mt-1">✅ Selected: {csvFileName}</p>}
+                                    </div>
+                                )}
+
+                                {/* কমন ফিল্ডস */}
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-500 mb-1">Timeframe</label>
+                                    <select className={inputBaseClasses} value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
+                                        {TIMEFRAME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+
+                            {/* অন্যান্য প্যারামিটার */}
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-medium text-gray-500 mb-1">Strategy</label>
+                                    <select className={inputBaseClasses} value={strategy} onChange={(e) => setStrategy(e.target.value)}>
+                                        <optgroup label="Standard"><option value="RSI Crossover">RSI Crossover</option></optgroup>
+                                        {customStrategies.length > 0 && <optgroup label="Custom">{customStrategies.map(s => <option key={s} value={s}>{s}</option>)}</optgroup>}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-500 mb-1">Start Date</label>
+                                    <DatePicker selected={startDate ? new Date(startDate) : null} onChange={(date: Date | null) => setStartDate(date ? date.toISOString().split('T')[0] : '')} className={inputBaseClasses} />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-500 mb-1">End Date</label>
+                                    <DatePicker selected={endDate ? new Date(endDate) : null} onChange={(date: Date | null) => setEndDate(date ? date.toISOString().split('T')[0] : '')} className={inputBaseClasses} />
+                                </div>
+                            </div>
+
+                            {/* ✅ Execution Realism UI */}
+                            <div className="mt-6 pt-4 border-t border-brand-border-light dark:border-brand-border-dark">
+                                <div className="flex items-center gap-2 mb-4">
+                                    <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                                        Execution Realism (Fees & Slippage)
+                                    </h3>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    {/* Commission Input */}
+                                    <div className="relative">
+                                        <label className="block text-xs font-medium text-gray-500 mb-1">
+                                            Trading Fee (Commission)
+                                        </label>
+                                        <div className="flex items-center">
+                                            <input
+                                                type="number"
+                                                step="0.0001"
+                                                value={commission}
+                                                onChange={(e) => setCommission(parseFloat(e.target.value))}
+                                                className="w-full bg-white dark:bg-brand-dark/50 border border-brand-border-light dark:border-brand-border-dark rounded-l-md p-2 text-sm text-slate-900 dark:text-white focus:ring-brand-primary focus:border-brand-primary"
+                                            />
+                                            <span className="bg-gray-100 dark:bg-gray-800 border border-l-0 border-brand-border-light dark:border-brand-border-dark rounded-r-md px-3 py-2 text-xs text-gray-500">
+                                                {(commission * 100).toFixed(2)}%
                                             </span>
                                         </div>
                                     </div>
 
-                                    {/* 2. Total Trades */}
-                                    <div className="flex flex-col">
-                                        <span className="text-xs text-gray-400 mb-1">Total Trades</span>
-                                        <span className="text-xl font-bold text-gray-100 font-mono">
-                                            {singleResult.total_trades}
-                                        </span>
-                                    </div>
-
-                                    {/* 3. Percent Profitable */}
-                                    <div className="flex flex-col">
-                                        <span className="text-xs text-gray-400 mb-1">Percent Profitable</span>
-                                        <span className="text-xl font-bold text-gray-100 font-mono">
-                                            {singleResult.winRate ? singleResult.winRate.toFixed(2) : singleResult.advanced_metrics?.win_rate?.toFixed(2)}%
-                                        </span>
-                                    </div>
-
-                                    {/* 4. Profit Factor */}
-                                    <div className="flex flex-col">
-                                        <span className="text-xs text-gray-400 mb-1">Profit Factor</span>
-                                        <span className="text-xl font-bold text-gray-100 font-mono">
-                                            {singleResult.advanced_metrics?.profit_factor?.toFixed(2) || 'N/A'}
-                                        </span>
-                                    </div>
-
-                                    {/* 5. Max Drawdown */}
-                                    <div className="flex flex-col">
-                                        <span className="text-xs text-gray-400 mb-1">Max Drawdown</span>
-                                        <span className="text-xl font-bold text-[#F23645] font-mono">
-                                            {singleResult.maxDrawdown?.toFixed(2)}%
-                                        </span>
-                                    </div>
-
-                                    {/* 6. Sharpe Ratio */}
-                                    <div className="flex flex-col">
-                                        <span className="text-xs text-gray-400 mb-1">Sharpe Ratio</span>
-                                        <span className="text-xl font-bold text-[#2962FF] font-mono">
-                                            {singleResult.sharpeRatio?.toFixed(2)}
-                                        </span>
+                                    {/* Slippage Input */}
+                                    <div className="relative">
+                                        <label className="block text-xs font-medium text-gray-500 mb-1">
+                                            Slippage Model
+                                        </label>
+                                        <div className="flex items-center">
+                                            <input
+                                                type="number"
+                                                step="0.0001"
+                                                value={slippage}
+                                                onChange={(e) => setSlippage(parseFloat(e.target.value))}
+                                                className="w-full bg-white dark:bg-brand-dark/50 border border-brand-border-light dark:border-brand-border-dark rounded-l-md p-2 text-sm text-slate-900 dark:text-white focus:ring-brand-primary focus:border-brand-primary"
+                                            />
+                                            <span className="bg-gray-100 dark:bg-gray-800 border border-l-0 border-brand-border-light dark:border-brand-border-dark rounded-r-md px-3 py-2 text-xs text-gray-500">
+                                                {(slippage * 100).toFixed(2)}%
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* C. Detailed Matrix & Trade Log */}
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            {backtestMode === 'single' ? renderSingleParams() : renderOptimizationParams()}
 
-                                {/* Matrix Table */}
-                                <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg">
-                                    <div className="px-6 py-4 border-b border-[#2A2E39] bg-[#1e222d] flex items-center gap-2">
-                                        <Activity className="h-4 w-4 text-[#2962FF]" />
-                                        <h3 className="text-sm font-semibold text-gray-200">Key Metrics Matrix</h3>
-                                    </div>
-                                    <div className="p-0">
-                                        <table className="w-full text-sm text-left">
-                                            <tbody>
-                                                {singleResult.advanced_metrics && Object.entries(singleResult.advanced_metrics).map(([key, value], index) => (
-                                                    <tr key={key} className={`border-b border-[#2A2E39] last:border-0 ${index % 2 === 0 ? 'bg-[#1e222d]' : 'bg-[#131722]'}`}>
-                                                        <td className="px-6 py-3 text-gray-400 capitalize font-medium">
-                                                            {key.replace(/_/g, ' ')}
-                                                        </td>
-                                                        <td className="px-6 py-3 text-right text-gray-100 font-mono">
-                                                            {(typeof value === 'number') ? value.toFixed(2) : value}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-
-                                {/* Trade Log Table */}
-                                <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg flex flex-col h-[400px]">
-                                    <div className="px-6 py-4 border-b border-[#2A2E39] bg-[#1e222d] flex items-center gap-2">
-                                        <Layers className="h-4 w-4 text-[#2962FF]" />
-                                        <h3 className="text-sm font-semibold text-gray-200">Trade List</h3>
-                                    </div>
-                                    <div className="flex-1 overflow-auto custom-scrollbar">
-                                        <table className="w-full text-xs text-left">
-                                            <thead className="bg-[#1e222d] text-gray-400 sticky top-0 z-10">
-                                                <tr>
-                                                    <th className="px-4 py-2 bg-[#1e222d]">Type</th>
-                                                    <th className="px-4 py-2 bg-[#1e222d]">Price</th>
-                                                    <th className="px-4 py-2 text-right bg-[#1e222d]">P/L</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {singleResult.trades_log?.map((trade: any, idx: number) => (
-                                                    <tr key={idx} className="border-b border-[#2A2E39] hover:bg-[#2A2E39] transition-colors">
-                                                        <td className={`px-4 py-2 font-bold ${trade.side === 'BUY' ? 'text-[#089981]' : 'text-[#F23645]'}`}>
-                                                            {trade.side || (trade.size > 0 ? 'BUY' : 'SELL')}
-                                                        </td>
-                                                        <td className="px-4 py-2 font-mono text-gray-300">
-                                                            {trade.price?.toFixed(2)}
-                                                        </td>
-                                                        <td className={`px-4 py-2 text-right font-mono ${trade.pnl >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
-                                                            {trade.pnl ? trade.pnl.toFixed(2) : '-'}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Batch/Optimization Results Table */}
-                    {(batchResults || multiObjectiveResults) && (
-                        <Card>
-                            <h2 className="text-xl font-bold mb-6 text-purple-400">{batchResults ? 'Batch Results' : 'Optimization Report'}</h2>
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-gray-100 dark:bg-gray-900 text-gray-500 uppercase">
-                                        <tr className="border-b border-gray-200 dark:border-gray-700">
-                                            <th className="px-4 py-3">Rank</th>
-                                            <th className="px-4 py-3">Profit %</th>
-                                            <th className="px-4 py-3">Sharpe Ratio</th>
-                                            <th className="px-4 py-3">Max DD</th>
-                                            <th className="px-4 py-3">Parameters</th>
-                                            {multiObjectiveResults && <th className="px-4 py-3 text-center">Action</th>}
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                                        {(batchResults || multiObjectiveResults)?.map((res: any, idx: number) => (
-                                            <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                                                <td className="px-4 py-3 font-bold text-gray-500">#{idx + 1}</td>
-                                                <td className={`px-4 py-3 font-bold ${res.profitPercent >= 0 ? 'text-green-500' : 'text-red-500'}`}>{res.profitPercent.toFixed(2)}%</td>
-                                                <td className="px-4 py-3 font-mono">{res.sharpeRatio.toFixed(2)}</td>
-                                                <td className="px-4 py-3 text-red-500">-{res.maxDrawdown.toFixed(2)}%</td>
-                                                <td className="px-4 py-3 text-xs text-gray-500 font-mono">{JSON.stringify(res.params).replace(/"/g, '').replace(/{|}/g, '')}</td>
-                                                {multiObjectiveResults && (
-                                                    <td className="px-4 py-3 text-center"><Button size="sm" variant="outline" onClick={() => handleLoadParams(res.params)}>Load</Button></td>
-                                                )}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                            <div className="mt-8 pt-6 border-t border-brand-border-light dark:border-brand-border-dark flex items-center gap-4">
+                                <Button onClick={handleRunBacktest} className="w-full md:w-auto" disabled={isContextLoading || isLoading || isSyncing || isOptimizing || isBatchRunning}>
+                                    {isContextLoading ? 'Processing...' : isOptimizing ? 'Optimizing...' : backtestMode === 'single' ? 'Run Backtest' : 'Run Optimization'}
+                                </Button>
+                                <Button variant="secondary" onClick={handleRunAllStrategies} disabled={isOptimizing || isBatchRunning}>
+                                    Run All Strategies
+                                </Button>
                             </div>
                         </Card>
-                    )}
-                </>
-            )}
+
+                        {/* SINGLE BACKTEST PROGRESS */}
+                        {isRunning && (
+                            <Card className="mt-6 border border-blue-500/20 bg-blue-500/5 animate-fade-in">
+                                <div className="flex flex-col justify-center items-center py-12">
+                                    {/* Circular Loader */}
+                                    <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+
+                                    <h2 className="text-xl font-bold text-slate-900 dark:text-white">Running Strategy...</h2>
+                                    <p className="text-blue-500 font-mono text-lg mt-2">{progress}% Completed</p>
+
+                                    {/* Linear Progress */}
+                                    <div className="w-64 h-2 bg-gray-200 dark:bg-gray-700 rounded-full mt-4 overflow-hidden">
+                                        <div
+                                            className="h-full bg-blue-500 transition-all duration-300 ease-out"
+                                            style={{ width: `${progress}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                            </Card>
+                        )}
+
+                        {/* RESULTS SECTION */}
+                        {isOptimizing && (
+                            <Card className="mt-6 border border-brand-primary/20 bg-brand-primary/5">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h2 className="text-xl font-bold flex items-center gap-2">Optimization in Progress...</h2>
+                                    <Button variant="outline" className="text-red-500 border-red-500 h-8 px-3" onClick={handleStopOptimization}>Stop</Button>
+                                </div>
+                                <div className="w-full bg-gray-200 rounded-full h-4 dark:bg-gray-700 overflow-hidden relative">
+                                    <div className="bg-brand-primary h-4 rounded-full transition-all duration-500" style={{ width: `${optimizationProgress}%` }}></div>
+                                </div>
+                            </Card>
+                        )}
+
+                        {/* --- TRADINGVIEW STYLE RESULTS SECTION --- */}
+                        {showResults && singleResult && !isOptimizing && (
+                            <div className="animate-fade-in space-y-6 mt-6">
+
+                                {/* A. Chart Section */}
+                                {/* A. Main Chart Section */}
+                                <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg p-1">
+                                    {/* Main Price Chart */}
+                                    <div className="h-[450px]">
+                                        <BacktestChart
+                                            data={singleResult.candle_data}
+                                            trades={singleResult.trades_log || []}
+                                        />
+                                    </div>
+
+                                    {/* NEW: Underwater Drawdown Chart */}
+                                    <div className="h-[200px] border-t border-[#2A2E39] mt-1">
+                                        <UnderwaterChart
+                                            data={singleResult.underwater_data || calculateDrawdownFromCandles(singleResult.candle_data)}
+                                            height={200}
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* B. Performance Summary Panel */}
+                                <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg">
+                                    {/* Header Tabs */}
+                                    <div className="flex border-b border-[#2A2E39] px-4 bg-[#1e222d]">
+                                        <button className="px-4 py-3 text-sm font-medium text-[#2962FF] border-b-2 border-[#2962FF] hover:bg-[#2A2E39] transition-colors">
+                                            Overview
+                                        </button>
+                                        <button className="px-4 py-3 text-sm font-medium text-gray-400 hover:text-gray-200 hover:bg-[#2A2E39] transition-colors">
+                                            Performance Summary
+                                        </button>
+                                        <button className="px-4 py-3 text-sm font-medium text-gray-400 hover:text-gray-200 hover:bg-[#2A2E39] transition-colors">
+                                            List of Trades
+                                        </button>
+                                    </div>
+
+                                    {/* Metrics Grid */}
+                                    <div className="p-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
+
+                                        {/* 1. Net Profit */}
+                                        <div className="flex flex-col">
+                                            <span className="text-xs text-gray-400 mb-1">Net Profit</span>
+                                            <div className="flex items-baseline gap-2">
+                                                <span className={`text-xl font-bold font-mono ${singleResult.profitPercent && singleResult.profitPercent >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
+                                                    {singleResult.profitPercent && singleResult.profitPercent >= 0 ? '+' : ''}
+                                                    ${((singleResult.final_value || 0) - (singleResult.initial_cash || 10000)).toFixed(2)}
+                                                </span>
+                                                <span className={`text-xs ${singleResult.profitPercent && singleResult.profitPercent >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
+                                                    ({singleResult.profitPercent}%)
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* 2. Total Trades */}
+                                        <div className="flex flex-col">
+                                            <span className="text-xs text-gray-400 mb-1">Total Trades</span>
+                                            <span className="text-xl font-bold text-gray-100 font-mono">
+                                                {singleResult.total_trades}
+                                            </span>
+                                        </div>
+
+                                        {/* 3. Percent Profitable */}
+                                        <div className="flex flex-col">
+                                            <span className="text-xs text-gray-400 mb-1">Percent Profitable</span>
+                                            <span className="text-xl font-bold text-gray-100 font-mono">
+                                                {singleResult.winRate ? singleResult.winRate.toFixed(2) : singleResult.advanced_metrics?.win_rate?.toFixed(2)}%
+                                            </span>
+                                        </div>
+
+                                        {/* 4. Profit Factor */}
+                                        <div className="flex flex-col">
+                                            <span className="text-xs text-gray-400 mb-1">Profit Factor</span>
+                                            <span className="text-xl font-bold text-gray-100 font-mono">
+                                                {singleResult.advanced_metrics?.profit_factor?.toFixed(2) || 'N/A'}
+                                            </span>
+                                        </div>
+
+                                        {/* 5. Max Drawdown */}
+                                        <div className="flex flex-col">
+                                            <span className="text-xs text-gray-400 mb-1">Max Drawdown</span>
+                                            <span className="text-xl font-bold text-[#F23645] font-mono">
+                                                {singleResult.maxDrawdown?.toFixed(2)}%
+                                            </span>
+                                        </div>
+
+                                        {/* 6. Sharpe Ratio */}
+                                        <div className="flex flex-col">
+                                            <span className="text-xs text-gray-400 mb-1">Sharpe Ratio</span>
+                                            <span className="text-xl font-bold text-[#2962FF] font-mono">
+                                                {singleResult.sharpeRatio?.toFixed(2)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* C. Detailed Matrix & Trade Log */}
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                                    {/* Matrix Table */}
+                                    <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg">
+                                        <div className="px-6 py-4 border-b border-[#2A2E39] bg-[#1e222d] flex items-center gap-2">
+                                            <Activity className="h-4 w-4 text-[#2962FF]" />
+                                            <h3 className="text-sm font-semibold text-gray-200">Key Metrics Matrix</h3>
+                                        </div>
+                                        <div className="p-0">
+                                            <table className="w-full text-sm text-left">
+                                                <tbody>
+                                                    {singleResult.advanced_metrics && Object.entries(singleResult.advanced_metrics).map(([key, value], index) => (
+                                                        <tr key={key} className={`border-b border-[#2A2E39] last:border-0 ${index % 2 === 0 ? 'bg-[#1e222d]' : 'bg-[#131722]'}`}>
+                                                            <td className="px-6 py-3 text-gray-400 capitalize font-medium">
+                                                                {key.replace(/_/g, ' ')}
+                                                            </td>
+                                                            <td className="px-6 py-3 text-right text-gray-100 font-mono">
+                                                                {(typeof value === 'number') ? value.toFixed(2) : value}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+
+                                    {/* Trade Log Table */}
+                                    <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg flex flex-col h-[400px]">
+                                        <div className="px-6 py-4 border-b border-[#2A2E39] bg-[#1e222d] flex items-center gap-2">
+                                            <Layers className="h-4 w-4 text-[#2962FF]" />
+                                            <h3 className="text-sm font-semibold text-gray-200">Trade List</h3>
+                                        </div>
+                                        <div className="flex-1 overflow-auto custom-scrollbar">
+                                            <table className="w-full text-xs text-left">
+                                                <thead className="bg-[#1e222d] text-gray-400 sticky top-0 z-10">
+                                                    <tr>
+                                                        <th className="px-4 py-2 bg-[#1e222d]">Type</th>
+                                                        <th className="px-4 py-2 bg-[#1e222d]">Price</th>
+                                                        <th className="px-4 py-2 text-right bg-[#1e222d]">P/L</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {singleResult.trades_log?.map((trade: any, idx: number) => (
+                                                        <tr key={idx} className="border-b border-[#2A2E39] hover:bg-[#2A2E39] transition-colors">
+                                                            <td className={`px-4 py-2 font-bold ${trade.side === 'BUY' ? 'text-[#089981]' : 'text-[#F23645]'}`}>
+                                                                {trade.side || (trade.size > 0 ? 'BUY' : 'SELL')}
+                                                            </td>
+                                                            <td className="px-4 py-2 font-mono text-gray-300">
+                                                                {trade.price?.toFixed(2)}
+                                                            </td>
+                                                            <td className={`px-4 py-2 text-right font-mono ${trade.pnl >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
+                                                                {trade.pnl ? trade.pnl.toFixed(2) : '-'}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Batch/Optimization Results Table */}
+                        {(batchResults || multiObjectiveResults) && (
+                            <Card>
+                                <h2 className="text-xl font-bold mb-6 text-purple-400">{batchResults ? 'Batch Results' : 'Optimization Report'}</h2>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left text-sm">
+                                        <thead className="bg-gray-100 dark:bg-gray-900 text-gray-500 uppercase">
+                                            <tr className="border-b border-gray-200 dark:border-gray-700">
+                                                <th className="px-4 py-3">Rank</th>
+                                                <th className="px-4 py-3">Profit %</th>
+                                                <th className="px-4 py-3">Sharpe Ratio</th>
+                                                <th className="px-4 py-3">Max DD</th>
+                                                <th className="px-4 py-3">Parameters</th>
+                                                {multiObjectiveResults && <th className="px-4 py-3 text-center">Action</th>}
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                                            {(batchResults || multiObjectiveResults)?.map((res: any, idx: number) => (
+                                                <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                                                    <td className="px-4 py-3 font-bold text-gray-500">#{idx + 1}</td>
+                                                    <td className={`px-4 py-3 font-bold ${res.profitPercent >= 0 ? 'text-green-500' : 'text-red-500'}`}>{res.profitPercent.toFixed(2)}%</td>
+                                                    <td className="px-4 py-3 font-mono">{res.sharpeRatio.toFixed(2)}</td>
+                                                    <td className="px-4 py-3 text-red-500">-{res.maxDrawdown.toFixed(2)}%</td>
+                                                    <td className="px-4 py-3 text-xs text-gray-500 font-mono">{JSON.stringify(res.params).replace(/"/g, '').replace(/{|}/g, '')}</td>
+                                                    {multiObjectiveResults && (
+                                                        <td className="px-4 py-3 text-center"><Button size="sm" variant="outline" onClick={() => handleLoadParams(res.params)}>Load</Button></td>
+                                                    )}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </Card>
+                        )}
+                    </>
+                )
+            }
 
 
             {/* DOWNLOAD MODAL */}
