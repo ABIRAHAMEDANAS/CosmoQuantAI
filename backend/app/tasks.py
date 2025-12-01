@@ -109,3 +109,224 @@ def run_optimization_task(self, symbol: str, timeframe: str, strategy_name: str,
         
     finally:
         db.close()
+
+import ccxt
+import os
+import csv
+import time
+from datetime import datetime
+from .celery_app import celery_app
+from celery import current_task
+from tqdm import tqdm
+from .utils import get_redis_client  # ✅ Redis ক্লায়েন্ট ইম্পোর্ট
+
+DATA_FEED_DIR = "app/data_feeds"
+os.makedirs(DATA_FEED_DIR, exist_ok=True)
+
+# --- Helper: শেষ টাইমস্ট্যাম্প বের করার ফাংশন ---
+def get_last_timestamp(file_path):
+    try:
+        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+            return None
+        with open(file_path, 'rb') as f:
+            try:
+                f.seek(-2, os.SEEK_END)
+                while f.read(1) != b'\n':
+                    f.seek(-2, os.SEEK_CUR)
+            except OSError:
+                f.seek(0)
+            
+            last_line = f.readline().decode().strip()
+            if not last_line: return None
+            data = last_line.split(',')
+            
+            # Trade data (timestamp at index 1)
+            if len(data) > 1 and data[1].isdigit():
+                return int(data[1])
+            # Candle data (datetime at index 0)
+            if len(data) > 0:
+                 try:
+                    dt_obj = datetime.strptime(data[0], "%Y-%m-%d %H:%M:%S")
+                    return int(dt_obj.timestamp() * 1000)
+                 except: pass
+    except Exception:
+        return None
+    return None
+
+# --- Task 1: Download Candles (OHLCV) ---
+@celery_app.task(bind=True)
+def download_candles_task(self, exchange_id, symbol, timeframe, start_date, end_date=None):
+    try:
+        # ১. এক্সচেঞ্জ ভেরিফিকেশন
+        if exchange_id not in ccxt.exchanges:
+            return {"status": "failed", "error": f"Exchange {exchange_id} not found"}
+            
+        exchange_class = getattr(ccxt, exchange_id)
+        exchange = exchange_class({'enableRateLimit': True})
+        redis_client = get_redis_client()  # ✅ Redis কানেকশন
+        
+        safe_symbol = symbol.replace('/', '-')
+        filename = f"{exchange_id}_{safe_symbol}_{timeframe}.csv"
+        save_path = f"{DATA_FEED_DIR}/{filename}"
+        
+        # ২. সময় ক্যালকুলেশন
+        since = exchange.parse8601(start_date)
+        
+        if end_date:
+            end_ts = exchange.parse8601(end_date)
+        else:
+            end_ts = exchange.milliseconds()
+
+        # ৩. রিজুউম লজিক
+        if os.path.exists(save_path):
+            with open(save_path, 'r') as f:
+                lines = f.readlines()
+                if len(lines) > 1:
+                    last_line = lines[-1].strip().split(',')
+                    try:
+                        last_ts_obj = datetime.strptime(last_line[0], "%Y-%m-%d %H:%M:%S")
+                        last_ts = int(last_ts_obj.timestamp() * 1000)
+                        if last_ts:
+                            since = last_ts + 1
+                            print(f"🔄 Resuming {symbol} download from {last_line[0]}")
+                    except: pass
+
+        total_duration = end_ts - since
+        if total_duration <= 0:
+             return {"status": "completed", "message": "Data is already up to date."}
+
+        start_ts = since
+        mode = 'a' if os.path.exists(save_path) else 'w'
+        
+        print(f"🚀 Starting download: {symbol} ({timeframe}) | Target: {end_date or 'NOW'}")
+
+        # ৪. ডাউনলোড লুপ
+        with open(save_path, mode, newline='') as f:
+            writer = csv.writer(f)
+            if mode == 'w' or os.path.getsize(save_path) == 0:
+                writer.writerow(['datetime', 'open', 'high', 'low', 'close', 'volume'])
+            
+            with tqdm(total=total_duration, unit="ms", desc=f"📥 {symbol}", ncols=80) as pbar:
+                while True:
+                    # ✅ ফিক্স: Redis চেক করে Stop করা
+                    if self.request.id and redis_client.exists(f"abort_task:{self.request.id}"):
+                        print(f"🛑 Download stopped for {symbol}")
+                        return {"status": "stopped", "message": "Stopped by user"}
+
+                    try:
+                        if since >= end_ts: break
+
+                        candles = exchange.fetch_ohlcv(symbol, timeframe, since, limit=1000)
+                        if not candles: break
+                        
+                        rows = []
+                        for c in candles:
+                            if c[0] > end_ts: continue
+                            dt_str = datetime.fromtimestamp(c[0]/1000).strftime('%Y-%m-%d %H:%M:%S')
+                            rows.append([dt_str, c[1], c[2], c[3], c[4], c[5]])
+                        
+                        if rows:
+                            writer.writerows(rows)
+                            f.flush()
+                        
+                        current_ts = candles[-1][0]
+                        
+                        # আপডেট
+                        step = current_ts - since
+                        pbar.update(step)
+                        since = current_ts + 1
+                        
+                        progress_pct = min(100, int(((current_ts - start_ts) / total_duration) * 100))
+                        self.update_state(state='PROGRESS', meta={'percent': progress_pct, 'status': 'Downloading...'})
+                        
+                        if current_ts >= end_ts: break
+                        
+                    except Exception as e:
+                        time.sleep(2)
+                        continue
+
+        return {"status": "completed", "filename": filename}
+
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
+
+# --- Task 2: Download Trades (Tick Data) ---
+@celery_app.task(bind=True)
+def download_trades_task(self, exchange_id, symbol, start_date, end_date=None):
+    try:
+        if exchange_id not in ccxt.exchanges:
+             return {"status": "failed", "error": f"Exchange {exchange_id} not found"}
+        
+        exchange_class = getattr(ccxt, exchange_id)
+        exchange = exchange_class({'enableRateLimit': True})
+        redis_client = get_redis_client()  # ✅ Redis কানেকশন
+        
+        safe_symbol = symbol.replace('/', '-')
+        filename = f"trades_{exchange_id}_{safe_symbol}.csv"
+        save_path = f"{DATA_FEED_DIR}/{filename}"
+        
+        since = exchange.parse8601(start_date)
+        if end_date:
+            end_ts = exchange.parse8601(end_date)
+        else:
+            end_ts = exchange.milliseconds()
+
+        if os.path.exists(save_path):
+            last_ts = get_last_timestamp(save_path)
+            if last_ts: 
+                since = last_ts + 1
+                print(f"🔄 Resuming Trades {symbol} from timestamp {last_ts}")
+        
+        total_duration = end_ts - since
+        if total_duration <= 0:
+             return {"status": "completed", "message": "Trades already up to date."}
+
+        start_ts = since
+        mode = 'a' if os.path.exists(save_path) else 'w'
+        
+        print(f"🚀 Starting Trade DL: {symbol} | Target: {end_date or 'NOW'}")
+
+        with open(save_path, mode, newline='') as f:
+            writer = csv.writer(f)
+            if mode == 'w' or os.path.getsize(save_path) == 0:
+                writer.writerow(['id', 'timestamp', 'datetime', 'symbol', 'side', 'price', 'amount', 'cost'])
+            
+            with tqdm(total=total_duration, unit="ms", desc=f"Tick {symbol}", ncols=80) as pbar:
+                while True:
+                    # ✅ ফিক্স: Redis চেক করে Stop করা
+                    if self.request.id and redis_client.exists(f"abort_task:{self.request.id}"):
+                         return {"status": "stopped", "message": "Stopped by user"}
+
+                    try:
+                        if since >= end_ts: break
+
+                        trades = exchange.fetch_trades(symbol, since, limit=1000)
+                        if not trades: break
+                        
+                        rows = []
+                        for t in trades:
+                            if t['timestamp'] > end_ts: continue
+                            rows.append([t['id'], t['timestamp'], t['datetime'], t['symbol'], t['side'], t['price'], t['amount'], t['cost']])
+                        
+                        if rows:
+                            writer.writerows(rows)
+                            f.flush()
+                        
+                        current_ts = trades[-1]['timestamp']
+                        step = current_ts - since
+                        pbar.update(step)
+                        since = current_ts + 1
+                        
+                        progress_pct = min(100, int(((current_ts - start_ts) / total_duration) * 100))
+                        self.update_state(state='PROGRESS', meta={'percent': progress_pct, 'status': 'Fetching Trades...'})
+                        
+                        if current_ts >= end_ts: break
+                        
+                    except Exception as e:
+                        time.sleep(2)
+                        continue
+                    
+        return {"status": "completed", "filename": filename}
+
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}

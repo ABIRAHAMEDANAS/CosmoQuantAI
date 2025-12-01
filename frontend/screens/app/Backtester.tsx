@@ -12,7 +12,7 @@ import CodeEditor from '../../components/ui/CodeEditor';
 import type { BacktestResult, Timeframe } from '../../types';
 
 import { useToast } from '../../contexts/ToastContext';
-import { syncMarketData, runBacktestApi, runOptimizationApi, getBacktestStatus, getExchangeList, getExchangeMarkets, uploadStrategyFile, generateStrategy, fetchCustomStrategyList, fetchStrategyCode, revokeBacktestTask, uploadBacktestDataFile } from '../../services/backtester';
+import { syncMarketData, runBacktestApi, runOptimizationApi, getBacktestStatus, getExchangeList, getExchangeMarkets, uploadStrategyFile, generateStrategy, fetchCustomStrategyList, fetchStrategyCode, revokeBacktestTask, uploadBacktestDataFile, downloadCandles, downloadTrades, getDownloadStatus } from '../../services/backtester';
 import { useBacktest } from '../../contexts/BacktestContext';
 import { AIFoundryIcon } from '../../constants';
 import SearchableSelect from '../../components/ui/SearchableSelect';
@@ -21,7 +21,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import MonthlyReturnsHeatmap from '../../components/ui/MonthlyReturnsHeatmap';
 
-import { Activity, Layers, PlayIcon, CodeIcon, SaveIcon, UploadCloud } from 'lucide-react';
+import { Activity, Layers, PlayIcon, CodeIcon, SaveIcon, UploadCloud, Download, X, AlertCircle } from 'lucide-react';
 
 // --- Constants ---
 const TIMEFRAME_OPTIONS: Timeframe[] = [
@@ -256,7 +256,97 @@ const Backtester: React.FC = () => {
     const [backtestResult, setBacktestResult] = useState<any>(null);
     const [progress, setProgress] = useState(0);
 
-    // ✅ ডাটা ফাইল আপলোড হ্যান্ডলার
+    // Download Modal States
+    const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
+    const [downloadType, setDownloadType] = useState<'candles' | 'trades'>('candles');
+    const [dlExchange, setDlExchange] = useState('binance');
+    const [dlSymbol, setDlSymbol] = useState('BTC/USDT');
+    const [dlTimeframe, setDlTimeframe] = useState('1h');
+    const [dlStartDate, setDlStartDate] = useState('2024-01-01');
+    const [dlEndDate, setDlEndDate] = useState(''); // ✅ ডিফল্ট ফাঁকা (মানে Till Now)
+
+    // ✅ Running States
+    const [isDownloading, setIsDownloading] = useState(false);
+    const [downloadProgress, setDownloadProgress] = useState(0);
+    const [activeTaskId, setActiveTaskId] = useState<string | null>(null); // ✅ টাস্ক আইডি ট্র্যাক করার জন্য
+
+    // ✅ ১. ডাউনলোড হ্যান্ডলার (Start)
+    const handleStartDownload = async () => {
+        setIsDownloading(true);
+        setDownloadProgress(0);
+
+        try {
+            // End Date ফাঁকা থাকলে undefined পাঠাব, যাতে ব্যাকএন্ড "Till Now" ধরে নেয়
+            const payload = {
+                exchange: dlExchange,
+                symbol: dlSymbol,
+                start_date: `${dlStartDate} 00:00:00`,
+                end_date: dlEndDate ? `${dlEndDate} 23:59:59` : undefined // ✅ Till Now লজিক
+            };
+
+            let res;
+            if (downloadType === 'candles') {
+                res = await downloadCandles({ ...payload, timeframe: dlTimeframe });
+            } else {
+                res = await downloadTrades(payload);
+            }
+
+            const taskId = res.task_id;
+            setActiveTaskId(taskId); // টাস্ক আইডি সেভ
+
+            // পোলিং শুরু
+            const interval = setInterval(async () => {
+                try {
+                    const status = await getDownloadStatus(taskId);
+
+                    if (status.status === 'Processing') {
+                        setDownloadProgress(status.percent);
+                    } else if (status.status === 'Completed') {
+                        clearInterval(interval);
+                        setIsDownloading(false);
+                        setDownloadProgress(100);
+                        setActiveTaskId(null);
+                        showToast('Download Completed Successfully! 🎉', 'success');
+                    } else if (status.status === 'Failed' || status.status === 'Revoked') {
+                        clearInterval(interval);
+                        setIsDownloading(false);
+                        setActiveTaskId(null);
+
+                        if (status.status === 'Revoked') {
+                            showToast('Download Stopped by User.', 'info');
+                        } else {
+                            showToast(`Download Failed: ${status.error}`, 'error');
+                        }
+                    }
+                } catch (e) {
+                    clearInterval(interval);
+                    setIsDownloading(false);
+                }
+            }, 1000);
+
+        } catch (e) {
+            console.error(e);
+            setIsDownloading(false);
+            showToast('Failed to start download', 'error');
+        }
+    };
+
+    // ✅ ২. স্টপ হ্যান্ডলার (Stop Button Action)
+    const handleStopDownload = async () => {
+        if (!activeTaskId) return;
+
+        try {
+            // ব্যাকএন্ডে Stop সিগনাল পাঠানো
+            await revokeBacktestTask(activeTaskId);
+            showToast('Stopping download...', 'warning');
+
+            // UI আপডেট (পোলিং এর মাধ্যমে ফাইনাল কনফার্মেশন আসবে)
+        } catch (e) {
+            console.error(e);
+            showToast('Failed to stop task.', 'error');
+        }
+    };
+
     // ✅ ডাটা ফাইল আপলোড হ্যান্ডলার
     const handleDataFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
@@ -731,6 +821,9 @@ const Backtester: React.FC = () => {
                 </h1>
 
                 <div className="flex bg-gray-200 dark:bg-brand-dark p-1 rounded-lg">
+                    <Button onClick={() => setIsDownloadModalOpen(true)} className="flex gap-2 mr-2" variant="secondary">
+                        <Download size={16} /> Download Data
+                    </Button>
                     <button
                         onClick={() => setActiveTab('backtest')}
                         className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'backtest' ? 'bg-white dark:bg-brand-primary text-slate-900 dark:text-white shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
@@ -1111,6 +1204,117 @@ const Backtester: React.FC = () => {
                         </Card>
                     )}
                 </>
+            )}
+
+            {/* DOWNLOAD MODAL */}
+            {/* ✅ DOWNLOAD MODAL */}
+            {isDownloadModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                    <Card className="w-full max-w-md relative animate-fade-in">
+                        <button
+                            onClick={() => !isDownloading && setIsDownloadModalOpen(false)}
+                            disabled={isDownloading}
+                            className="absolute top-4 right-4 text-gray-500 hover:text-white disabled:opacity-50"
+                        >
+                            <X size={20} />
+                        </button>
+
+                        <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                            <Download className="text-brand-primary" /> Market Data Downloader
+                        </h2>
+
+                        <div className="space-y-4">
+                            {/* Type Selection */}
+                            <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+                                <button onClick={() => setDownloadType('candles')} disabled={isDownloading} className={`flex-1 py-2 text-sm font-medium rounded transition-all ${downloadType === 'candles' ? 'bg-white shadow text-brand-primary' : 'text-gray-500 hover:text-gray-700'}`}>Candles (OHLCV)</button>
+                                <button onClick={() => setDownloadType('trades')} disabled={isDownloading} className={`flex-1 py-2 text-sm font-medium rounded transition-all ${downloadType === 'trades' ? 'bg-white shadow text-brand-primary' : 'text-gray-500 hover:text-gray-700'}`}>Trades (Tick Data)</button>
+                            </div>
+
+                            {/* Inputs */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-xs text-gray-500 mb-1 block">Exchange</label>
+                                    <input value={dlExchange} onChange={(e) => setDlExchange(e.target.value)} disabled={isDownloading} className="w-full p-2 border rounded bg-transparent text-sm" placeholder="binance" />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 mb-1 block">Symbol</label>
+                                    <input value={dlSymbol} onChange={(e) => setDlSymbol(e.target.value)} disabled={isDownloading} className="w-full p-2 border rounded bg-transparent text-sm" placeholder="BTC/USDT" />
+                                </div>
+                            </div>
+
+                            {downloadType === 'candles' && (
+                                <div>
+                                    <label className="text-xs text-gray-500 mb-1 block">Timeframe</label>
+                                    <select value={dlTimeframe} onChange={(e) => setDlTimeframe(e.target.value)} disabled={isDownloading} className="w-full p-2 border rounded bg-transparent text-sm">
+                                        {TIMEFRAME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+                                    </select>
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-xs text-gray-500 mb-1 block">Start Date</label>
+                                    <input type="date" value={dlStartDate} onChange={(e) => setDlStartDate(e.target.value)} disabled={isDownloading} className="w-full p-2 border rounded bg-transparent text-sm" />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-gray-500 mb-1 block">End Date (Optional)</label>
+                                    <input
+                                        type="date"
+                                        value={dlEndDate}
+                                        onChange={(e) => setDlEndDate(e.target.value)}
+                                        disabled={isDownloading}
+                                        className="w-full p-2 border rounded bg-transparent text-sm placeholder-gray-400"
+                                    />
+                                    {!dlEndDate && <span className="text-[10px] text-brand-primary absolute mt-[-20px] ml-[100px] bg-white px-1">Till Now</span>}
+                                </div>
+                            </div>
+
+                            {/* Info Box */}
+                            <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-md flex items-start gap-2">
+                                <AlertCircle size={16} className="text-blue-500 mt-0.5" />
+                                <p className="text-xs text-blue-600 dark:text-blue-400">
+                                    {downloadType === 'trades'
+                                        ? "Tick data files can be very large. Download supports auto-resume if stopped."
+                                        : "Candle data is faster. Leave End Date empty to download up to the current moment."}
+                                </p>
+                            </div>
+
+                            {/* Progress Bar */}
+                            {isDownloading && (
+                                <div className="space-y-2 pt-2 animate-fade-in">
+                                    <div className="flex justify-between text-xs font-medium">
+                                        <span className="text-brand-primary animate-pulse">Downloading...</span>
+                                        <span>{downloadProgress}%</span>
+                                    </div>
+                                    <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 overflow-hidden">
+                                        <div className="bg-brand-primary h-2.5 rounded-full transition-all duration-300 relative" style={{ width: `${downloadProgress}%` }}>
+                                            <div className="absolute inset-0 bg-white/30 animate-[shimmer_2s_infinite]"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Action Buttons */}
+                            <div className="pt-4 flex gap-3">
+                                <Button variant="secondary" onClick={() => setIsDownloadModalOpen(false)} disabled={isDownloading} className="flex-1">
+                                    Close
+                                </Button>
+
+                                {isDownloading ? (
+                                    // ✅ STOP BUTTON
+                                    <Button onClick={handleStopDownload} className="flex-1 bg-red-500 hover:bg-red-600 text-white border-red-600 shadow-red-500/20">
+                                        ⏹ Stop Download
+                                    </Button>
+                                ) : (
+                                    // ✅ START BUTTON
+                                    <Button onClick={handleStartDownload} className="flex-1">
+                                        Start Download
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+                    </Card>
+                </div>
             )}
         </div>
     );

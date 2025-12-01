@@ -25,7 +25,7 @@ from .services.market_service import MarketService
 from .services.backtest_engine import BacktestEngine
 from .services import ai_service
 from celery.result import AsyncResult
-from .tasks import run_backtest_task, run_optimization_task
+from .tasks import run_backtest_task, run_optimization_task, download_candles_task, download_trades_task
 from .celery_app import celery_app
 
 UPLOAD_DIR = "app/strategies/custom"
@@ -542,3 +542,44 @@ def revoke_task(task_id: str, current_user: models.User = Depends(auth.get_curre
         print(f"⚠️ Redis Error in revoke: {e}")
         
     return {"status": "Revoked", "message": f"Stop signal sent for Task {task_id}."}
+
+# ১. Candle Data ডাউনলোডের এন্ডপয়েন্ট
+@app.post("/api/download/candles")
+def start_candle_download(request: schemas.DownloadRequest):
+    # end_date এখানে None হতে পারে, যা টাস্কে হ্যান্ডেল করা হয়েছে
+    task = download_candles_task.delay(
+        exchange_id=request.exchange,
+        symbol=request.symbol,
+        timeframe=request.timeframe,
+        start_date=request.start_date,
+        end_date=request.end_date 
+    )
+    return {"task_id": task.id, "status": "Started"}
+
+@app.post("/api/download/trades")
+def start_trade_download(request: schemas.DownloadRequest):
+    task = download_trades_task.delay(
+        exchange_id=request.exchange,
+        symbol=request.symbol,
+        start_date=request.start_date,
+        end_date=request.end_date
+    )
+    return {"task_id": task.id, "status": "Started"}
+
+# ৩. টাস্ক স্ট্যাটাস চেক (Download এর জন্য আলাদা)
+@app.get("/api/download/status/{task_id}")
+def get_download_status(task_id: str):
+    task_result = AsyncResult(task_id)
+    if task_result.state == 'PENDING':
+        return {"status": "Pending", "percent": 0}
+    elif task_result.state == 'PROGRESS':
+        return {
+            "status": "Processing", 
+            "percent": task_result.info.get('percent', 0),
+            "message": task_result.info.get('status', '')
+        }
+    elif task_result.state == 'SUCCESS':
+        return {"status": "Completed", "percent": 100, "result": task_result.result}
+    elif task_result.state == 'FAILURE':
+        return {"status": "Failed", "error": str(task_result.result)}
+    return {"status": task_result.state}

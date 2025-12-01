@@ -117,3 +117,18 @@ export const revokeBacktestTask = async (taskId: string) => {
     const response = await apiClient.post(`/backtest/revoke/${taskId}`);
     return response.data;
 };
+
+export const downloadCandles = async (payload: { exchange: string; symbol: string; timeframe: string; start_date: string }) => {
+    const response = await apiClient.post('/download/candles', payload);
+    return response.data;
+};
+
+export const downloadTrades = async (payload: { exchange: string; symbol: string; start_date: string }) => {
+    const response = await apiClient.post('/download/trades', payload);
+    return response.data;
+};
+
+export const getDownloadStatus = async (taskId: string) => {
+    const response = await apiClient.get(`/download/status/${taskId}`);
+    return response.data;
+};
