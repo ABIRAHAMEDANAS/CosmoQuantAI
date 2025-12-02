@@ -286,11 +286,25 @@ const Backtester: React.FC = () => {
             try {
                 const data = JSON.parse(event.data);
                 if (data.type === "sync_progress") {
-                    setProgress(data.payload.progress);
-                    setSyncStatusMessage(data.payload.message);
+                    // Handle message with direct percent/status (no payload)
+                    if (data.percent !== undefined) {
+                        setProgress(data.percent);
+                        setSyncStatusMessage(data.status);
 
-                    if (data.payload.progress === 100) {
-                        setTimeout(() => setIsSyncing(false), 2000);
+                        if (data.percent === 100) {
+                            setTimeout(() => setIsSyncing(false), 2000);
+                        }
+                    }
+                    // Handle legacy/alternative message with payload
+                    else if (data.payload && typeof data.payload === 'object') {
+                        setProgress(data.payload.progress);
+                        setSyncStatusMessage(data.payload.message);
+
+                        if (data.payload.progress === 100) {
+                            setTimeout(() => setIsSyncing(false), 2000);
+                        }
+                    } else {
+                        console.warn("WS Parse Warning: 'sync_progress' message received without valid data.", data);
                     }
                 }
             } catch (e) {
