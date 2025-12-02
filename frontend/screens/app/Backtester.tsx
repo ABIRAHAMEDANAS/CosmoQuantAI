@@ -21,8 +21,9 @@ import UnderwaterChart from '../../components/ui/UnderwaterChart'; // ✅ Underw
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import MonthlyReturnsHeatmap from '../../components/ui/MonthlyReturnsHeatmap';
+import ParameterHeatmap from '../../components/ui/ParameterHeatmap';
 
-import { Activity, Layers, PlayIcon, CodeIcon, SaveIcon, UploadCloud, Download, X, AlertCircle, Settings, Info } from 'lucide-react';
+import { Activity, Layers, PlayIcon, CodeIcon, SaveIcon, UploadCloud, Download, X, AlertCircle, Settings, Info, LayoutGrid, List } from 'lucide-react';
 
 // --- Constants ---
 const TIMEFRAME_OPTIONS: Timeframe[] = [
@@ -246,6 +247,7 @@ const Backtester: React.FC = () => {
     const [singleResult, setSingleResult] = useState<BacktestResult | null>(null);
     const [multiObjectiveResults, setMultiObjectiveResults] = useState<BacktestResult[] | null>(null);
     const [batchResults, setBatchResults] = useState<BacktestResult[] | null>(null);
+    const [viewMode, setViewMode] = useState<'table' | 'heatmap'>('table');
 
     // AI Inputs
     const [aiPrompt, setAiPrompt] = useState('');
@@ -1575,38 +1577,67 @@ const Backtester: React.FC = () => {
                             </div>
                         )}
 
-                        {/* Batch/Optimization Results Table */}
+                        {/* Batch/Optimization Results Table & Heatmap */}
                         {(batchResults || multiObjectiveResults) && (
-                            <Card>
-                                <h2 className="text-xl font-bold mb-6 text-purple-400">{batchResults ? 'Batch Results' : 'Optimization Report'}</h2>
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-left text-sm">
-                                        <thead className="bg-gray-100 dark:bg-gray-900 text-gray-500 uppercase">
-                                            <tr className="border-b border-gray-200 dark:border-gray-700">
-                                                <th className="px-4 py-3">Rank</th>
-                                                <th className="px-4 py-3">Profit %</th>
-                                                <th className="px-4 py-3">Sharpe Ratio</th>
-                                                <th className="px-4 py-3">Max DD</th>
-                                                <th className="px-4 py-3">Parameters</th>
-                                                {multiObjectiveResults && <th className="px-4 py-3 text-center">Action</th>}
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                                            {(batchResults || multiObjectiveResults)?.map((res: any, idx: number) => (
-                                                <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                                                    <td className="px-4 py-3 font-bold text-gray-500">#{idx + 1}</td>
-                                                    <td className={`px-4 py-3 font-bold ${res.profitPercent >= 0 ? 'text-green-500' : 'text-red-500'}`}>{res.profitPercent.toFixed(2)}%</td>
-                                                    <td className="px-4 py-3 font-mono">{res.sharpeRatio.toFixed(2)}</td>
-                                                    <td className="px-4 py-3 text-red-500">-{res.maxDrawdown.toFixed(2)}%</td>
-                                                    <td className="px-4 py-3 text-xs text-gray-500 font-mono">{JSON.stringify(res.params).replace(/"/g, '').replace(/{|}/g, '')}</td>
-                                                    {multiObjectiveResults && (
-                                                        <td className="px-4 py-3 text-center"><Button size="sm" variant="outline" onClick={() => handleLoadParams(res.params)}>Load</Button></td>
-                                                    )}
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                            <Card className="animate-fade-in">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h2 className="text-xl font-bold text-purple-400">
+                                        {batchResults ? 'Batch Results' : 'Optimization Report'}
+                                    </h2>
+
+                                    {/* View Switcher Toggle */}
+                                    <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+                                        <button
+                                            onClick={() => setViewMode('table')}
+                                            className={`p-2 rounded-md transition-all ${viewMode === 'table' ? 'bg-white dark:bg-brand-primary text-brand-primary dark:text-white shadow' : 'text-gray-400 hover:text-gray-600'}`}
+                                            title="Table View"
+                                        >
+                                            <List size={18} />
+                                        </button>
+                                        <button
+                                            onClick={() => setViewMode('heatmap')}
+                                            className={`p-2 rounded-md transition-all ${viewMode === 'heatmap' ? 'bg-white dark:bg-brand-primary text-brand-primary dark:text-white shadow' : 'text-gray-400 hover:text-gray-600'}`}
+                                            title="Heatmap View"
+                                        >
+                                            <LayoutGrid size={18} />
+                                        </button>
+                                    </div>
                                 </div>
+
+                                {viewMode === 'heatmap' ? (
+                                    /* 🔥 HEATMAP VIEW 🔥 */
+                                    <ParameterHeatmap results={(batchResults || multiObjectiveResults) || []} />
+                                ) : (
+                                    /* 📋 TABLE VIEW (Existing Code) */
+                                    <div className="overflow-x-auto custom-scrollbar">
+                                        <table className="w-full text-left text-sm">
+                                            <thead className="bg-gray-100 dark:bg-gray-900 text-gray-500 uppercase">
+                                                <tr className="border-b border-gray-200 dark:border-gray-700">
+                                                    <th className="px-4 py-3">Rank</th>
+                                                    <th className="px-4 py-3">Profit %</th>
+                                                    <th className="px-4 py-3">Sharpe Ratio</th>
+                                                    <th className="px-4 py-3">Max DD</th>
+                                                    <th className="px-4 py-3">Parameters</th>
+                                                    {multiObjectiveResults && <th className="px-4 py-3 text-center">Action</th>}
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                                                {(batchResults || multiObjectiveResults)?.map((res: any, idx: number) => (
+                                                    <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                                                        <td className="px-4 py-3 font-bold text-gray-500">#{idx + 1}</td>
+                                                        <td className={`px-4 py-3 font-bold ${res.profitPercent >= 0 ? 'text-green-500' : 'text-red-500'}`}>{res.profitPercent.toFixed(2)}%</td>
+                                                        <td className="px-4 py-3 font-mono">{res.sharpeRatio.toFixed(2)}</td>
+                                                        <td className="px-4 py-3 text-red-500">-{res.maxDrawdown.toFixed(2)}%</td>
+                                                        <td className="px-4 py-3 text-xs text-gray-500 font-mono">{JSON.stringify(res.params).replace(/"/g, '').replace(/{|}/g, '')}</td>
+                                                        {multiObjectiveResults && (
+                                                            <td className="px-4 py-3 text-center"><Button size="sm" variant="outline" onClick={() => handleLoadParams(res.params)}>Load</Button></td>
+                                                        )}
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
                             </Card>
                         )}
                     </>
@@ -1615,7 +1646,6 @@ const Backtester: React.FC = () => {
 
 
             {/* DOWNLOAD MODAL */}
-            {/* ✅ DOWNLOAD MODAL */}
             {
                 isDownloadModalOpen && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -1660,7 +1690,7 @@ const Backtester: React.FC = () => {
                                     </div>
                                 )}
 
-                                {/* ✅ এই অংশটি মিসিং ছিল: Start & End Date Inputs */}
+                                {/* Start & End Date Inputs */}
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
                                         <label className="text-xs text-gray-500 mb-1 block">Start Date</label>
@@ -1681,11 +1711,10 @@ const Backtester: React.FC = () => {
                                             disabled={isDownloading}
                                             className="w-full p-2 border rounded bg-transparent text-sm placeholder-gray-400"
                                         />
-                                        {/* Till Now ব্যাজ */}
+                                        {/* Till Now Badge */}
                                         {!dlEndDate && <span className="text-[10px] text-brand-primary absolute mt-[-28px] right-8 bg-white/80 px-1 rounded pointer-events-none">Till Now</span>}
                                     </div>
                                 </div>
-                                {/* ✅ ডেট ইনপুট অংশের শেষ */}
 
                                 {/* Info Box */}
                                 <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-md flex items-start gap-2">
@@ -1720,12 +1749,10 @@ const Backtester: React.FC = () => {
                                 </Button>
 
                                 {isDownloading ? (
-                                    // ✅ STOP BUTTON
                                     <Button onClick={handleStopDownload} className="flex-1 bg-red-500 hover:bg-red-600 text-white border-red-600 shadow-red-500/20">
                                         ⏹ Stop Download
                                     </Button>
                                 ) : (
-                                    // ✅ START BUTTON
                                     <Button onClick={handleStartDownload} className="flex-1">
                                         Start Download
                                     </Button>
