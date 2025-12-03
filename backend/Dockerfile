@@ -11,6 +11,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy all backend files
 COPY . .
 
+# Fix line endings for prestart.sh (Windows compatibility)
+RUN sed -i 's/\r$//' /app/prestart.sh
+
 # Expose port
 EXPOSE 8000
 

@@ -1,0 +1,10 @@
+# সব টেক্সট ফাইল অটোমেটিক ডিটেক্ট করবে, কিন্তু .sh ফাইল সবসময় LF হবে
+* text=auto
+
+# লিনাক্স স্ক্রিপ্ট ফাইলগুলো সবসময় LF (Line Feed) মোডে থাকবে
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Docker সম্পর্কিত ফাইলগুলোও LF মোডে রাখা ভালো
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf
