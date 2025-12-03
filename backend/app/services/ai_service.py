@@ -88,8 +88,17 @@ def generate_strategy_code(user_prompt: str) -> str:
             contents=f"{system_instruction}\n\nUser Strategy Idea: {user_prompt}"
         )
         
-        # ক্লিনআপ: যদি AI ভুল করে মার্কডাউন দেয়, তা রিমুভ করা হবে
-        clean_code = response.text.replace("```python", "").replace("```", "").strip()
+        raw_text = response.text
+        
+        # Robust cleanup using regex to find code blocks
+        import re
+        code_match = re.search(r"```python(.*?)```", raw_text, re.DOTALL)
+        if code_match:
+            clean_code = code_match.group(1).strip()
+        else:
+            # Fallback: just strip backticks if no block found
+            clean_code = raw_text.replace("```python", "").replace("```", "").strip()
+            
         return clean_code
     
     except Exception as e:

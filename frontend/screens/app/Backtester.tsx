@@ -278,43 +278,64 @@ const Backtester: React.FC = () => {
 
     // WebSocket Connection for Sync Progress
     useEffect(() => {
-        const ws = new WebSocket("ws://localhost:8000/ws");
+        let ws: WebSocket | null = null;
+        let reconnectTimeout: NodeJS.Timeout;
 
-        ws.onopen = () => {
-            console.log("Connected to WebSocket for Progress");
-        };
+        const connectWebSocket = () => {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.hostname;
+            const port = '8000'; // Backend port
+            const wsUrl = `${protocol}//${host}:${port}/ws`;
 
-        ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                if (data.type === "sync_progress") {
-                    // Handle message with direct percent/status (no payload)
-                    if (data.percent !== undefined) {
-                        setProgress(data.percent);
-                        setSyncStatusMessage(data.status);
+            ws = new WebSocket(wsUrl);
 
-                        if (data.percent === 100) {
-                            setTimeout(() => setIsSyncing(false), 2000);
+            ws.onopen = () => {
+                console.log("Connected to WebSocket for Progress");
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === "sync_progress") {
+                        if (data.percent !== undefined) {
+                            setProgress(data.percent);
+                            setSyncStatusMessage(data.status);
+
+                            if (data.percent === 100) {
+                                setTimeout(() => setIsSyncing(false), 2000);
+                            }
                         }
                     }
-                    // Handle legacy/alternative message with payload
-                    else if (data.payload && typeof data.payload === 'object') {
-                        setProgress(data.payload.progress);
-                        setSyncStatusMessage(data.payload.message);
-
-                        if (data.payload.progress === 100) {
-                            setTimeout(() => setIsSyncing(false), 2000);
-                        }
-                    } else {
-                        console.warn("WS Parse Warning: 'sync_progress' message received without valid data.", data);
-                    }
+                } catch (e) {
+                    console.error("Error parsing WS message:", e);
                 }
-            } catch (e) {
-                console.error("WS Parse Error", e);
-            }
+            };
+
+            ws.onerror = (event) => {
+                console.error("WS Error (Progress):", event);
+                // Log all properties of the event object
+                for (const key in event) {
+                    console.log(`Event property: ${key} =`, (event as any)[key]);
+                }
+                if (reconnectTimeout) clearTimeout(reconnectTimeout);
+                reconnectTimeout = setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onclose = (event) => {
+                console.log(`WS Connection closed: ${event.code}`);
+                if (event.code !== 1000) {
+                    if (reconnectTimeout) clearTimeout(reconnectTimeout);
+                    reconnectTimeout = setTimeout(connectWebSocket, 3000);
+                }
+            };
         };
 
-        return () => ws.close();
+        connectWebSocket();
+
+        return () => {
+            if (ws) ws.close();
+            if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        };
     }, []);
 
     // Download Modal States
@@ -732,13 +753,16 @@ const Backtester: React.FC = () => {
 
     // ✅ WebSocket Listener Fix
     useEffect(() => {
-        // আপনার ব্যাকএন্ড URL এবং পোর্ট (8000)
-        const safeSymbol = symbol ? symbol.replace('/', '') : 'BTCUSDT';
-        const wsUrl = `ws://localhost:8000/ws/market-data/${safeSymbol}`;
+        let ws: WebSocket | null = null;
+        let reconnectTimeout: NodeJS.Timeout;
 
-        let ws: WebSocket | null = null; // WebSocket রেফারেন্স
+        const connectWebSocket = () => {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.hostname;
+            const port = '8000';
+            const safeSymbol = symbol ? symbol.replace('/', '') : 'BTCUSDT';
+            const wsUrl = `${protocol}//${host}:${port}/ws/market-data/${safeSymbol}`;
 
-        try {
             ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
@@ -751,12 +775,6 @@ const Backtester: React.FC = () => {
 
                     // 🎯 শুধু 'sync_progress' টাইপের মেসেজ আমরা প্রসেস করব
                     if (data.type === "sync_progress") {
-
-                        // ❌ ভুল কোড (যা এরর দিচ্ছে): 
-                        // setProgress(data.payload.progress); 
-
-                        // ✅ সঠিক কোড:
-                        // ব্যাকএন্ড এখন সরাসরি 'percent' এবং 'status' পাঠায়
                         setSyncProgress(data.percent || 0);
                         setSyncStatusText(data.status || "Processing...");
 
@@ -771,16 +789,30 @@ const Backtester: React.FC = () => {
                 }
             };
 
-            ws.onerror = (err) => {
-                console.error("WS Error:", err);
+            ws.onerror = (event) => {
+                console.error("WS Error (Market Data):", event);
+                // Log all properties of the event object
+                for (const key in event) {
+                    console.log(`Event property: ${key} =`, (event as any)[key]);
+                }
+                if (reconnectTimeout) clearTimeout(reconnectTimeout);
+                reconnectTimeout = setTimeout(connectWebSocket, 3000);
             };
 
-        } catch (e) {
-            console.error("WS Connection Failed", e);
-        }
+            ws.onclose = (event) => {
+                console.log(`Market Data WS closed: ${event.code}`);
+                if (event.code !== 1000) {
+                    if (reconnectTimeout) clearTimeout(reconnectTimeout);
+                    reconnectTimeout = setTimeout(connectWebSocket, 3000);
+                }
+            };
+        };
+
+        connectWebSocket();
 
         return () => {
             if (ws) ws.close();
+            if (reconnectTimeout) clearTimeout(reconnectTimeout);
         };
     }, [symbol]); // সিম্বল পাল্টালে রিকানেক্ট হবে
 

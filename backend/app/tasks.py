@@ -67,6 +67,8 @@ def run_backtest_task(self, symbol: str, timeframe: str, strategy_name: str, ini
         return result
         
     except Exception as e:
+        import traceback
+        print(f"❌ Backtest Error Traceback:\n{traceback.format_exc()}", flush=True)
         return {"status": "error", "message": str(e)}
         
     finally:
@@ -138,6 +140,7 @@ def run_optimization_task(self, symbol: str, timeframe: str, strategy_name: str,
         
     finally:
         db.close()
+
 import ccxt
 import os
 import csv
@@ -342,7 +345,7 @@ def download_trades_task(self, exchange_id, symbol, start_date, end_date=None):
             with tqdm(total=total_duration, unit="ms", desc=f"Tick {symbol}", ncols=80) as pbar:
                 while True:
                     if self.request.id and redis_client.exists(f"abort_task:{self.request.id}"):
-                         return {"status": "stopped", "message": "Stopped by user"}
+                          return {"status": "stopped", "message": "Stopped by user"}
 
                     try:
                         if since >= end_ts: break

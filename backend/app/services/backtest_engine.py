@@ -373,7 +373,6 @@ class BacktestEngine:
         except Exception:
             return {"profitPercent": 0, "maxDrawdown": 0, "sharpeRatio": 0}
 
-    # ... (Helper Functions remain unchanged) ...
     def _load_strategy_class(self, strategy_name):
         strategy_class = STRATEGY_MAP.get(strategy_name)
         if not strategy_class:
@@ -381,10 +380,11 @@ class BacktestEngine:
                 file_name = f"{strategy_name}.py" if not strategy_name.endswith(".py") else strategy_name
                 file_path = f"app/strategies/custom/{file_name}"
                 if os.path.exists(file_path):
-                    spec = importlib.util.spec_from_file_location("custom_strategy", file_path)
+                    module_name = file_name.replace('.py', '')
+                    spec = importlib.util.spec_from_file_location(module_name, file_path)
                     module = importlib.util.module_from_spec(spec)
                     spec.loader.exec_module(module)
-                    sys.modules[file_name.replace('.py', '')] = module
+                    sys.modules[module_name] = module
                     for name, obj in inspect.getmembers(module):
                         if inspect.isclass(obj) and issubclass(obj, bt.Strategy) and obj is not bt.Strategy:
                             return obj
