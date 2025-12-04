@@ -33,6 +33,7 @@ from celery.result import AsyncResult
 from .tasks import run_backtest_task, run_optimization_task, download_candles_task, download_trades_task, run_batch_backtest_task
 from .celery_app import celery_app
 from app.strategies import STRATEGY_MAP
+from app.constants import STANDARD_STRATEGY_PARAMS
 
 UPLOAD_DIR = "app/strategies/custom"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -428,6 +429,15 @@ async def upload_strategy(file: UploadFile = File(...), current_user: models.Use
         "filename": file.filename, 
         "message": "Strategy uploaded successfully. It will be available for backtesting."
     }
+
+# --- Standard Strategy Parameters Endpoint ---
+@app.get("/api/strategies/standard-params")
+def get_standard_strategy_params():
+    """
+    Returns default parameters for standard built-in strategies (RSI, MACD, etc.)
+    Used by frontend to generate dynamic forms.
+    """
+    return STANDARD_STRATEGY_PARAMS
 
 # --- Get Custom Strategy List Endpoint ---
 @app.get("/api/strategies/list")

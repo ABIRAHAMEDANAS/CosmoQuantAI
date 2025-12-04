@@ -12,7 +12,7 @@ import CodeEditor from '../../components/ui/CodeEditor';
 import type { BacktestResult, Timeframe } from '../../types';
 
 import { useToast } from '../../contexts/ToastContext';
-import { syncMarketData, runBacktestApi, runOptimizationApi, getBacktestStatus, getExchangeList, getExchangeMarkets, uploadStrategyFile, generateStrategy, fetchCustomStrategyList, fetchStrategyCode, revokeBacktestTask, uploadBacktestDataFile, downloadCandles, downloadTrades, getDownloadStatus, runBatchBacktest, getTaskStatus } from '../../services/backtester';
+import { syncMarketData, runBacktestApi, runOptimizationApi, getBacktestStatus, getExchangeList, getExchangeMarkets, uploadStrategyFile, generateStrategy, fetchCustomStrategyList, fetchStrategyCode, revokeBacktestTask, uploadBacktestDataFile, downloadCandles, downloadTrades, getDownloadStatus, runBatchBacktest, getTaskStatus, fetchStandardStrategyParams } from '../../services/backtester';
 import { useBacktest } from '../../contexts/BacktestContext';
 import { AIFoundryIcon } from '../../constants';
 import SearchableSelect from '../../components/ui/SearchableSelect';
@@ -242,6 +242,11 @@ const Backtester: React.FC = () => {
     const [customStrategies, setCustomStrategies] = useState<string[]>([]);
 
     const [params, setParams] = useState<Record<string, any>>({});
+
+    // ✅ নতুন স্টেট: ডায়নামিক কনফিগারেশন স্টোর করার জন্য
+    // শুরুতে MOCK_STRATEGY_PARAMS দিয়ে ইনিশিলাইজ করছি যাতে লোডিং এর সময় ক্র্যাশ না করে
+    const [standardParamsConfig, setStandardParamsConfig] = useState<Record<string, any>>(MOCK_STRATEGY_PARAMS);
+
     const [optimizationParams, setOptimizationParams] = useState<OptimizationParams>({});
     const [optimizableParams, setOptimizableParams] = useState<Record<string, any>>({});
 
@@ -584,6 +589,23 @@ const Backtester: React.FC = () => {
         initData();
     }, []);
 
+    // ✅ নতুন useEffect: ব্যাকএন্ড থেকে স্ট্যান্ডার্ড প্যারামিটার লোড করা
+    useEffect(() => {
+        const loadStandardParams = async () => {
+            try {
+                const config = await fetchStandardStrategyParams();
+                if (config && Object.keys(config).length > 0) {
+                    console.log("Loaded Standard Params from API:", config);
+                    setStandardParamsConfig(config);
+                }
+            } catch (error) {
+                console.error("Failed to load standard strategy params, using fallback.", error);
+                // ফেইল করলে MOCK_STRATEGY_PARAMS তো আছেই
+            }
+        };
+        loadStandardParams();
+    }, []);
+
     useEffect(() => {
         const loadMarkets = async () => {
             if (!selectedExchange) return;
@@ -712,24 +734,34 @@ const Backtester: React.FC = () => {
             } else {
                 // Standard strategies - load MOCK params but clear editor code
                 setCurrentStrategyCode(`# Source code not available for standard strategy: ${strategy}`);
-                // ... (Existing param logic for standard strategies) ...
-                const strategyParamsConfig = MOCK_STRATEGY_PARAMS[strategy as keyof typeof MOCK_STRATEGY_PARAMS];
+
+                // ✅ পরিবর্তন: এখন MOCK_STRATEGY_PARAMS এর বদলে standardParamsConfig ব্যবহার হবে
+                // const strategyParamsConfig = MOCK_STRATEGY_PARAMS[strategy]; // ❌ আগের কোড
+                const strategyParamsConfig = standardParamsConfig[strategy]; // ✅ নতুন কোড
+
                 if (strategyParamsConfig) {
+                    // Default Params সেট করা
                     const defaultParams = Object.keys(strategyParamsConfig).reduce((acc, key) => {
-                        acc[key] = strategyParamsConfig[key].defaultValue;
+                        // API রেসপন্সে 'default' ফিল্ড থাকে, আর মক ডাটাতে 'defaultValue'
+                        // তাই আমরা দুটোই চেক করব
+                        acc[key] = strategyParamsConfig[key].default ?? strategyParamsConfig[key].defaultValue;
                         return acc;
                     }, {} as Record<string, any>);
                     setParams(defaultParams);
+
+                    // Optimization Params সেট করা
                     const defaultOptParams = Object.keys(strategyParamsConfig).reduce((acc, key) => {
+                        const conf = strategyParamsConfig[key];
+                        const defVal = conf.default ?? conf.defaultValue;
                         acc[key] = {
-                            start: strategyParamsConfig[key].min ?? strategyParamsConfig[key].defaultValue,
-                            end: strategyParamsConfig[key].max ?? strategyParamsConfig[key].defaultValue,
-                            step: strategyParamsConfig[key].step || 1,
+                            start: conf.min ?? defVal,
+                            end: conf.max ?? defVal,
+                            step: conf.step || 1,
                         };
                         return acc;
                     }, {} as OptimizationParams);
                     setOptimizationParams(defaultOptParams);
-                    setOptimizableParams({});
+                    setOptimizableParams(strategyParamsConfig); // ✅ UI রেন্ডারিং এর জন্য কনফিগ সেট করা
                 } else {
                     setParams({});
                     setOptimizationParams({});
@@ -738,7 +770,7 @@ const Backtester: React.FC = () => {
             }
         };
         loadStrategyParams();
-    }, [strategy, customStrategies]);
+    }, [strategy, customStrategies, standardParamsConfig]);
 
     // ... (Handler functions: ParamChange, GoalToggle, LoadParams, etc. kept same) ...
     const handleParamChange = (key: string, value: string) => {
@@ -1657,19 +1689,19 @@ const Backtester: React.FC = () => {
                                         </button>
                                     </div>
 
-                                    {/* Metrics Grid (Fixed & Safe) */}
+                                    {/* Metrics Grid */}
                                     <div className="p-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
 
                                         {/* 1. Net Profit */}
                                         <div className="flex flex-col">
                                             <span className="text-xs text-gray-400 mb-1">Net Profit</span>
                                             <div className="flex items-baseline gap-2">
-                                                <span className={`text-xl font-bold font-mono ${getSafeValue(singleResult, ['profitPercent', 'profit_percent']) >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
-                                                    {getSafeValue(singleResult, ['profitPercent', 'profit_percent']) >= 0 ? '+' : ''}
+                                                <span className={`text-xl font-bold font-mono ${singleResult.profitPercent && singleResult.profitPercent >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
+                                                    {singleResult.profitPercent && singleResult.profitPercent >= 0 ? '+' : ''}
                                                     ${((singleResult.final_value || 0) - (singleResult.initial_cash || 10000)).toFixed(2)}
                                                 </span>
-                                                <span className={`text-xs ${getSafeValue(singleResult, ['profitPercent', 'profit_percent']) >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
-                                                    ({getSafeValue(singleResult, ['profitPercent', 'profit_percent']).toFixed(2)}%)
+                                                <span className={`text-xs ${singleResult.profitPercent && singleResult.profitPercent >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
+                                                    ({singleResult.profitPercent}%)
                                                 </span>
                                             </div>
                                         </div>
@@ -1678,7 +1710,7 @@ const Backtester: React.FC = () => {
                                         <div className="flex flex-col">
                                             <span className="text-xs text-gray-400 mb-1">Total Trades</span>
                                             <span className="text-xl font-bold text-gray-100 font-mono">
-                                                {getSafeValue(singleResult, ['total_trades', 'totalTrades'])}
+                                                {singleResult.total_trades}
                                             </span>
                                         </div>
 
@@ -1686,7 +1718,7 @@ const Backtester: React.FC = () => {
                                         <div className="flex flex-col">
                                             <span className="text-xs text-gray-400 mb-1">Percent Profitable</span>
                                             <span className="text-xl font-bold text-gray-100 font-mono">
-                                                {getSafeValue(singleResult, ['winRate', 'win_rate', 'win_ratio']).toFixed(2)}%
+                                                {singleResult.winRate ? singleResult.winRate.toFixed(2) : singleResult.advanced_metrics?.win_rate?.toFixed(2)}%
                                             </span>
                                         </div>
 
@@ -1694,7 +1726,7 @@ const Backtester: React.FC = () => {
                                         <div className="flex flex-col">
                                             <span className="text-xs text-gray-400 mb-1">Profit Factor</span>
                                             <span className="text-xl font-bold text-gray-100 font-mono">
-                                                {getSafeValue(singleResult, ['profitFactor', 'profit_factor']).toFixed(2)}
+                                                {singleResult.advanced_metrics?.profit_factor?.toFixed(2) || 'N/A'}
                                             </span>
                                         </div>
 
@@ -1702,7 +1734,7 @@ const Backtester: React.FC = () => {
                                         <div className="flex flex-col">
                                             <span className="text-xs text-gray-400 mb-1">Max Drawdown</span>
                                             <span className="text-xl font-bold text-[#F23645] font-mono">
-                                                {getSafeValue(singleResult, ['maxDrawdown', 'max_drawdown']).toFixed(2)}%
+                                                {singleResult.maxDrawdown?.toFixed(2)}%
                                             </span>
                                         </div>
 
@@ -1710,7 +1742,7 @@ const Backtester: React.FC = () => {
                                         <div className="flex flex-col">
                                             <span className="text-xs text-gray-400 mb-1">Sharpe Ratio</span>
                                             <span className="text-xl font-bold text-[#2962FF] font-mono">
-                                                {getSafeValue(singleResult, ['sharpeRatio', 'sharpe_ratio']).toFixed(2)}
+                                                {singleResult.sharpeRatio?.toFixed(2)}
                                             </span>
                                         </div>
                                     </div>
@@ -1934,6 +1966,7 @@ const Backtester: React.FC = () => {
                                     {selectedBatchResult.strategy} Analysis
                                 </h2>
                                 <p className="text-sm text-gray-500">
+                                    {/* ✅ সমাধান: getSafeValue ব্যবহার করা এবং ? (Optional Chaining) ব্যবহার করা */}
                                     {selectedBatchResult.market} • {selectedBatchResult.timeframe} •
                                     <span className={getSafeValue(selectedBatchResult, ['profitPercent', 'profit_percent']) >= 0 ? "text-green-500 ml-1" : "text-red-500 ml-1"}>
                                         {getSafeValue(selectedBatchResult, ['profitPercent', 'profit_percent']).toFixed(2)}% Profit

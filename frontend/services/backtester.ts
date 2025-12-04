@@ -139,3 +139,10 @@ export const syncMarketData = async (symbol: string, timeframe: string, start_da
     });
     return response.data;
 };
+
+// ✅ নতুন ফাংশন: স্ট্যান্ডার্ড স্ট্র্যাটেজি প্যারামস ফেচ করা
+export const fetchStandardStrategyParams = async () => {
+    // ব্যাকএন্ড রুট: /api/strategies/standard-params
+    const response = await apiClient.get('/strategies/standard-params');
+    return response.data;
+};
