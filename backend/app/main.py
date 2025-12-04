@@ -4,6 +4,7 @@ from app.services.websocket_manager import manager
 import asyncio
 import json
 import random  # ডামি ডাটার জন্য, প্রোডাকশনে CCXT Pro ব্যবহার করবেন
+import ccxt.async_support as ccxt  # এই লাইনটি নিশ্চিত করুন
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -307,33 +308,66 @@ async def upload_market_data(file: UploadFile = File(...), current_user: models.
     }
 
 # WebSocket এন্ডপয়েন্ট
+# --- ✅ WebSocket Endpoint (Real-time Market Data) [UPDATED] ---
 @app.websocket("/ws/market-data/{symbol}")
 async def websocket_endpoint(websocket: WebSocket, symbol: str):
     await manager.connect(websocket)
+    
+    # এক্সচেঞ্জ কানেকশন তৈরি (Binance)
+    exchange = ccxt.binance({
+        'enableRateLimit': True,
+    })
+    
     try:
         while True:
-            # এখানে CCXT Pro বা অন্য সোর্স থেকে রিয়েল ডাটা আসবে।
-            # উদাহরণের জন্য আমরা ডামি প্রাইস জেনারেট করছি:
+            try:
+                # ১. রিয়েল মার্কেট ডাটা ফেচ করা
+                ticker = await exchange.fetch_ticker(symbol)
+                
+                # ২. ডাটা ফরম্যাট করা
+                price = ticker.get('last')
+                ts = ticker.get('timestamp')
+                timestamp_str = datetime.fromtimestamp(ts / 1000).isoformat() if ts else str(datetime.utcnow())
+                
+                data = {
+                    "symbol": symbol,
+                    "price": price,
+                    "timestamp": timestamp_str,
+                    "high": ticker.get('high'),
+                    "low": ticker.get('low'),
+                    "volume": ticker.get('quoteVolume') 
+                }
+                
+                # ৩. ক্লায়েন্টকে পাঠানো
+                await websocket.send_json(data)
+                
+            except ccxt.NetworkError as e:
+                print(f"WS Network Error: {e}")
+                await asyncio.sleep(5)
+            except ccxt.ExchangeError as e:
+                print(f"WS Exchange Error: {e}")
+                await websocket.send_json({"error": str(e)})
+                await asyncio.sleep(5)
+            except Exception as e:
+                # 🔴 FIX: যদি কানেকশন ক্লোজ এরর হয়, তবে লুপ ব্রেক করুন
+                error_msg = str(e)
+                if "Cannot call \"send\" once a close message has been sent" in error_msg:
+                    print(f"Client disconnected normally from {symbol}")
+                    break  # লুপ থামিয়ে দিন
+                
+                print(f"WS Unexpected Error: {e}")
+                await asyncio.sleep(1)
             
-            # TODO: Replace with real CCXT Pro logic
-            # example: ticker = await exchange.watch_ticker(symbol)
-            
-            dummy_price = 60000 + random.uniform(-50, 50)
-            data = {
-                "symbol": symbol,
-                "price": round(dummy_price, 2),
-                "timestamp": str(datetime.utcnow())
-            }
-            
-            # ক্লায়েন্টকে ডাটা পাঠানো
-            await websocket.send_json(data)
-            
-            # ১ সেকেন্ড বিরতি (রিয়েল লাইফে ইভেন্ট-ড্রিভেন হবে)
+            # ৪. API রেট লিমিট ঠিক রাখতে বিরতি
             await asyncio.sleep(1)
             
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
         print(f"Client disconnected from {symbol} stream")
+    except Exception as e:
+        print(f"Critical WebSocket Error: {e}")
+    finally:
+        manager.disconnect(websocket)
+        await exchange.close()
 
 # ✅ নতুন: সাধারণ WebSocket এন্ডপয়েন্ট (Progress Updates এর জন্য)
 @app.websocket("/ws")
