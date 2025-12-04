@@ -28,8 +28,24 @@ export interface OptimizationRequest {
     slippage?: number;
 }
 
+export interface BatchBacktestParams {
+    strategies: string[];
+    symbol: string;
+    timeframe: string;
+    initial_cash: number;
+    start_date?: string;
+    end_date?: string;
+    commission?: number;
+    slippage?: number;
+}
+
 export const runBacktestApi = async (payload: BacktestRequest) => {
     const response = await apiClient.post('/backtest/run', payload);
+    return response.data;
+};
+
+export const runBatchBacktest = async (params: BatchBacktestParams) => {
+    const response = await apiClient.post('/backtest/batch-run', params);
     return response.data;
 };
 
@@ -39,6 +55,11 @@ export const runOptimizationApi = async (payload: OptimizationRequest) => {
 };
 
 export const getBacktestStatus = async (taskId: string) => {
+    const response = await apiClient.get(`/backtest/status/${taskId}`);
+    return response.data;
+};
+
+export const getTaskStatus = async (taskId: string) => {
     const response = await apiClient.get(`/backtest/status/${taskId}`);
     return response.data;
 };

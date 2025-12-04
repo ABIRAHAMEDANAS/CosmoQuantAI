@@ -437,7 +437,7 @@ class BacktestEngine:
 
             # Heatmap Logic (Same as before)
             if not returns.empty:
-                monthly_ret_series = returns.resample('M').apply(lambda x: (1 + x).prod() - 1)
+                monthly_ret_series = returns.resample('ME').apply(lambda x: (1 + x).prod() - 1)
                 for timestamp, value in monthly_ret_series.items():
                     if pd.notna(value):
                         heatmap_data.append({

@@ -12,7 +12,7 @@ import CodeEditor from '../../components/ui/CodeEditor';
 import type { BacktestResult, Timeframe } from '../../types';
 
 import { useToast } from '../../contexts/ToastContext';
-import { syncMarketData, runBacktestApi, runOptimizationApi, getBacktestStatus, getExchangeList, getExchangeMarkets, uploadStrategyFile, generateStrategy, fetchCustomStrategyList, fetchStrategyCode, revokeBacktestTask, uploadBacktestDataFile, downloadCandles, downloadTrades, getDownloadStatus } from '../../services/backtester';
+import { syncMarketData, runBacktestApi, runOptimizationApi, getBacktestStatus, getExchangeList, getExchangeMarkets, uploadStrategyFile, generateStrategy, fetchCustomStrategyList, fetchStrategyCode, revokeBacktestTask, uploadBacktestDataFile, downloadCandles, downloadTrades, getDownloadStatus, runBatchBacktest, getTaskStatus } from '../../services/backtester';
 import { useBacktest } from '../../contexts/BacktestContext';
 import { AIFoundryIcon } from '../../constants';
 import SearchableSelect from '../../components/ui/SearchableSelect';
@@ -207,7 +207,23 @@ const Backtester: React.FC = () => {
     } = useBacktest();
 
     // --- Tab State (NEW) ---
-    const [activeTab, setActiveTab] = useState<'backtest' | 'editor'>('backtest');
+    const [activeTab, setActiveTabState] = useState<'single' | 'batch' | 'optimization' | 'editor'>('single');
+
+    // Wrapper to handle state resets when switching tabs
+    const setActiveTab = (tab: 'single' | 'batch' | 'optimization' | 'editor') => {
+        setActiveTabState(tab);
+        // Reset states based on tab
+        if (tab === 'single') {
+            setBacktestMode('single');
+            setShowResults(false);
+        } else if (tab === 'batch') {
+            setBacktestMode('batch');
+            setShowResults(false);
+        } else if (tab === 'optimization') {
+            setBacktestMode('optimization');
+            setShowResults(false);
+        }
+    };
 
     const [strategies, setStrategies] = useState(MOCK_STRATEGIES);
     const [strategy, setStrategy] = useState('RSI Crossover');
@@ -227,7 +243,7 @@ const Backtester: React.FC = () => {
     const [currentStrategyCode, setCurrentStrategyCode] = useState('# Strategy code will appear here...');
 
     const [showResults, setShowResults] = useState(false);
-    const [backtestMode, setBacktestMode] = useState<'single' | 'optimization'>('single');
+    const [backtestMode, setBacktestMode] = useState<'single' | 'optimization' | 'batch'>('single');
     const [startDate, setStartDate] = useState('2023-01-01');
     const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
     const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -256,6 +272,8 @@ const Backtester: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [fileName, setFileName] = useState('');
     const [isBatchRunning, setIsBatchRunning] = useState(false);
+    const [batchProgress, setBatchProgress] = useState(0); // ✅ New State
+    const [batchStatusMsg, setBatchStatusMsg] = useState(""); // ✅ New State
     const [isReplayActive, setIsReplayActive] = useState(false);
     const [replayIndex, setReplayIndex] = useState(0);
     const [isPlaying, setIsPlaying] = useState(false);
@@ -694,8 +712,7 @@ const Backtester: React.FC = () => {
     };
     const handleLoadParams = (paramsToLoad: Record<string, number | string>) => {
         setParams(paramsToLoad);
-        setBacktestMode('single');
-        setActiveTab('backtest'); // Switch to backtest tab
+        setActiveTab('single'); // Switch to single backtest tab
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
@@ -1006,6 +1023,86 @@ const Backtester: React.FC = () => {
         return () => { if (replayIntervalRef.current) clearInterval(replayIntervalRef.current); };
     }, [isPlaying, replaySpeed]);
 
+
+
+    // ✅ Batch Backtest Handler
+    const handleBatchRun = async () => {
+        setIsBatchRunning(true);
+        setBatchResults(null);
+        setBatchProgress(0);
+        setBatchStatusMsg("Initializing Batch Run...");
+        setShowResults(false);
+
+        try {
+            // 1. Start Batch Task
+            const payload = {
+                strategies: customStrategies.length > 0 ? [...MOCK_STRATEGIES, ...customStrategies] : MOCK_STRATEGIES,
+                symbol: symbol || 'BTC/USDT',
+                timeframe: timeframe,
+                start_date: startDate,
+                end_date: endDate,
+                initial_cash: initialCash
+            };
+
+            const res = await runBatchBacktest(payload);
+            const taskId = res.task_id;
+            showToast('Batch Analysis Started!', 'success');
+
+            // 2. Poll for Status
+            // 2. Poll for Status
+            const intervalId = setInterval(async () => {
+                try {
+                    const statusData = await getTaskStatus(taskId);
+                    console.log("Poll Status:", statusData); // Debug log
+
+                    // Condition check update
+                    if (statusData.state === 'PROGRESS' || statusData.status === 'Processing') {
+                        // Get progress from metadata (sometimes percent is at root, sometimes in meta)
+                        const percent = statusData.percent || statusData.meta?.percent || 0;
+                        const message = statusData.message || statusData.meta?.status || "Processing...";
+
+                        setBatchProgress(percent);
+                        setBatchStatusMsg(`${message} (${percent}%)`);
+                    }
+
+                    // 3. কাজ শেষ হলে (SUCCESS বা Completed)
+                    if (statusData.state === 'SUCCESS' || statusData.status === 'Completed') {
+                        clearInterval(intervalId);
+                        setIsBatchRunning(false);
+                        setBatchProgress(100);
+                        setBatchStatusMsg("✅ Batch Test Completed!");
+
+                        // ✅ Safe Data Setting
+                        // আমরা চেক করব result এবং results আসলে আছে কি না
+                        const finalResults = statusData.result?.results || statusData.results || [];
+                        console.log("Setting Results:", finalResults); // কনসোলে চেক করার জন্য
+                        setBatchResults(finalResults);
+
+                        setShowResults(true);
+                        showToast('Batch Analysis Completed!', 'success');
+                    }
+
+                    // Failed
+                    if (statusData.state === 'FAILURE' || statusData.status === 'Failed') {
+                        clearInterval(intervalId);
+                        setIsBatchRunning(false);
+                        setBatchStatusMsg("❌ Batch Test Failed");
+                        console.error("Task Failed:", statusData.error);
+                        showToast(`Batch Failed: ${statusData.error}`, 'error');
+                    }
+
+                } catch (err) {
+                    console.error("Polling Error:", err);
+                }
+            }, 1000);
+
+        } catch (error) {
+            console.error(error);
+            setIsBatchRunning(false);
+            showToast('Failed to start batch analysis.', 'error');
+        }
+    };
+
     const handlePlayPause = () => {
         if (replayIndex >= EQUITY_CURVE_DATA.length - 1) setReplayIndex(0);
         setIsPlaying(!isPlaying);
@@ -1099,16 +1196,28 @@ const Backtester: React.FC = () => {
                         <Download size={16} /> Download Data
                     </Button>
                     <button
-                        onClick={() => setActiveTab('backtest')}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'backtest' ? 'bg-white dark:bg-brand-primary text-slate-900 dark:text-white shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+                        onClick={() => setActiveTab('single')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'single' ? 'bg-white dark:bg-brand-primary text-slate-900 dark:text-white shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
                     >
-                        <PlayIcon /> Backtest Engine
+                        <PlayIcon size={16} /> Single
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('batch')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'batch' ? 'bg-white dark:bg-brand-primary text-slate-900 dark:text-white shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+                    >
+                        <Layers size={16} /> Batch
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('optimization')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'optimization' ? 'bg-white dark:bg-brand-primary text-slate-900 dark:text-white shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
+                    >
+                        <Activity size={16} /> Optimize
                     </button>
                     <button
                         onClick={() => setActiveTab('editor')}
                         className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${activeTab === 'editor' ? 'bg-white dark:bg-brand-primary text-slate-900 dark:text-white shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
                     >
-                        <CodeIcon /> AI Strategy Lab
+                        <CodeIcon size={16} /> Editor
                     </button>
                 </div>
             </div>
@@ -1178,29 +1287,19 @@ const Backtester: React.FC = () => {
                 )
             }
 
-            {/* TAB CONTENT: BACKTEST ENGINE */}
+            {/* TAB CONTENT: BACKTEST ENGINE (SINGLE & OPTIMIZATION & BATCH) */}
             {
-                activeTab === 'backtest' && (
+                (activeTab === 'single' || activeTab === 'optimization' || activeTab === 'batch') && (
                     <>
                         <Card className="staggered-fade-in" style={{ animationDelay: '200ms' }}>
                             <div className="flex items-center justify-between mb-6">
-                                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Backtest Configuration</h2>
+                                <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+                                    {activeTab === 'single' && 'Single Strategy Backtest'}
+                                    {activeTab === 'batch' && 'Batch Strategy Runner'}
+                                    {activeTab === 'optimization' && 'Strategy Optimization'}
+                                </h2>
 
-                                {/* ✅ Mode Switcher */}
-                                <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
-                                    <button
-                                        onClick={() => setBacktestMode('single')}
-                                        className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${backtestMode === 'single' ? 'bg-white dark:bg-brand-primary text-slate-900 dark:text-white shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
-                                    >
-                                        Single Backtest
-                                    </button>
-                                    <button
-                                        onClick={() => setBacktestMode('optimization')}
-                                        className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${backtestMode === 'optimization' ? 'bg-white dark:bg-brand-primary text-slate-900 dark:text-white shadow' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}
-                                    >
-                                        AI Optimization
-                                    </button>
-                                </div>
+                                {/* Mode Switcher Removed - Tabs handle this now */}
 
                                 <Button variant="secondary" onClick={handleSyncData} disabled={isSyncing}>
                                     {isSyncing ? "Syncing..." : "☁ Sync Data"}
@@ -1395,15 +1494,21 @@ const Backtester: React.FC = () => {
                                 </div>
                             </div>
 
-                            {backtestMode === 'single' ? renderSingleParams() : renderOptimizationParams()}
+                            {activeTab === 'single' && renderSingleParams()}
+                            {activeTab === 'optimization' && renderOptimizationParams()}
+                            {/* Batch mode does not show params */}
 
                             <div className="mt-8 pt-6 border-t border-brand-border-light dark:border-brand-border-dark flex items-center gap-4">
-                                <Button onClick={handleRunBacktest} className="w-full md:w-auto" disabled={isContextLoading || isLoading || isSyncing || isOptimizing || isBatchRunning}>
-                                    {isContextLoading ? 'Processing...' : isOptimizing ? 'Optimizing...' : backtestMode === 'single' ? 'Run Backtest' : 'Run Optimization'}
-                                </Button>
-                                <Button variant="secondary" onClick={handleRunAllStrategies} disabled={isOptimizing || isBatchRunning}>
-                                    Run All Strategies
-                                </Button>
+                                {activeTab !== 'batch' && (
+                                    <Button onClick={handleRunBacktest} className="w-full md:w-auto" disabled={isContextLoading || isLoading || isSyncing || isOptimizing || isBatchRunning}>
+                                        {isContextLoading ? 'Processing...' : isOptimizing ? 'Optimizing...' : activeTab === 'single' ? 'Run Backtest' : 'Run Optimization'}
+                                    </Button>
+                                )}
+                                {activeTab === 'batch' && (
+                                    <Button variant="secondary" onClick={handleBatchRun} disabled={isOptimizing || isBatchRunning}>
+                                        {isBatchRunning ? `Running (${batchProgress}%)` : 'Start Batch Run'}
+                                    </Button>
+                                )}
                             </div>
                         </Card>
 
@@ -1437,6 +1542,19 @@ const Backtester: React.FC = () => {
                                 </div>
                                 <div className="w-full bg-gray-200 rounded-full h-4 dark:bg-gray-700 overflow-hidden relative">
                                     <div className="bg-brand-primary h-4 rounded-full transition-all duration-500" style={{ width: `${optimizationProgress}%` }}></div>
+                                </div>
+                            </Card>
+                        )}
+
+                        {/* BATCH PROGRESS */}
+                        {isBatchRunning && (
+                            <Card className="mt-6 border border-purple-500/20 bg-purple-500/5 animate-fade-in">
+                                <div className="flex flex-col justify-center items-center py-8">
+                                    <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Batch Analysis Running...</h2>
+                                    <p className="text-purple-500 font-mono text-sm mb-4">{batchStatusMsg}</p>
+                                    <div className="w-full max-w-md bg-gray-200 dark:bg-gray-700 rounded-full h-4 overflow-hidden relative">
+                                        <div className="bg-purple-600 h-4 rounded-full transition-all duration-300 ease-out" style={{ width: `${batchProgress}%` }}></div>
+                                    </div>
                                 </div>
                             </Card>
                         )}
@@ -1641,29 +1759,35 @@ const Backtester: React.FC = () => {
                                     <ParameterHeatmap results={(batchResults || multiObjectiveResults) || []} />
                                 ) : (
                                     /* 📋 TABLE VIEW (Existing Code) */
-                                    <div className="overflow-x-auto custom-scrollbar">
-                                        <table className="w-full text-left text-sm">
-                                            <thead className="bg-gray-100 dark:bg-gray-900 text-gray-500 uppercase">
-                                                <tr className="border-b border-gray-200 dark:border-gray-700">
-                                                    <th className="px-4 py-3">Rank</th>
-                                                    <th className="px-4 py-3">Profit %</th>
-                                                    <th className="px-4 py-3">Sharpe Ratio</th>
-                                                    <th className="px-4 py-3">Max DD</th>
-                                                    <th className="px-4 py-3">Parameters</th>
-                                                    {multiObjectiveResults && <th className="px-4 py-3 text-center">Action</th>}
+                                    <div className="overflow-x-auto">
+                                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                                            <thead className="bg-gray-50 dark:bg-gray-900">
+                                                <tr>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Strategy</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Profit %</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Win Rate</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Drawdown</th>
+                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Trades</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                                                {(batchResults || multiObjectiveResults)?.map((res: any, idx: number) => (
-                                                    <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                                                        <td className="px-4 py-3 font-bold text-gray-500">#{idx + 1}</td>
-                                                        <td className={`px-4 py-3 font-bold ${res.profitPercent >= 0 ? 'text-green-500' : 'text-red-500'}`}>{res.profitPercent.toFixed(2)}%</td>
-                                                        <td className="px-4 py-3 font-mono">{res.sharpeRatio.toFixed(2)}</td>
-                                                        <td className="px-4 py-3 text-red-500">-{res.maxDrawdown.toFixed(2)}%</td>
-                                                        <td className="px-4 py-3 text-xs text-gray-500 font-mono">{JSON.stringify(res.params).replace(/"/g, '').replace(/{|}/g, '')}</td>
-                                                        {multiObjectiveResults && (
-                                                            <td className="px-4 py-3 text-center"><Button size="sm" variant="outline" onClick={() => handleLoadParams(res.params)}>Load</Button></td>
-                                                        )}
+                                            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                                                {batchResults.map((res: any, idx) => (
+                                                    <tr key={idx} className={(res?.profit_percent || 0) > 0 ? "bg-green-50 dark:bg-green-900/10" : ""}>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                                                            {res?.strategy || "Unknown Strategy"}
+                                                        </td>
+                                                        <td className={`px-6 py-4 whitespace-nowrap text-sm font-bold ${(res?.profit_percent || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                            {res?.profit_percent?.toFixed(2) || "0.00"}%
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                                                            {res?.win_rate?.toFixed(2) || "0.00"}%
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-red-500">
+                                                            {res?.max_drawdown?.toFixed(2) || "0.00"}%
+                                                        </td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
+                                                            {res?.total_trades || 0}
+                                                        </td>
                                                     </tr>
                                                 ))}
                                             </tbody>

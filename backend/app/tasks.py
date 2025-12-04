@@ -2,7 +2,20 @@ from .celery_app import celery_app
 from .database import SessionLocal
 from .services.backtest_engine import BacktestEngine
 import sys
+import math
+import time
 from . import utils 
+from app.strategies import STRATEGY_MAP
+
+# ✅ নতুন হেল্পার ফাংশন: NaN চেক করার জন্য
+def clean_metric(value):
+    try:
+        if isinstance(value, (int, float)):
+            if math.isnan(value) or math.isinf(value):
+                return 0  # NaN বা Infinity হলে 0 রিটার্ন করবে
+        return value
+    except:
+        return 0
 
 # ✅ সুন্দর করে প্রিন্ট করার ফাংশন
 def print_pretty_result(result):
@@ -141,10 +154,95 @@ def run_optimization_task(self, symbol: str, timeframe: str, strategy_name: str,
     finally:
         db.close()
 
+@celery_app.task(bind=True)
+def run_batch_backtest_task(self, symbol: str, timeframe: str, initial_cash: float, start_date: str = None, end_date: str = None, commission: float = 0.001, slippage: float = 0.0):
+    db = SessionLocal()
+    engine = BacktestEngine()
+    
+    results = []
+    errors = []
+    
+    # ১. সব স্ট্র্যাটেজির নাম সংগ্রহ
+    builtin_strategies = ["SMA Crossover", "RSI Crossover", "MACD Crossover", "EMA Crossover", "Bollinger Bands"]
+    available_strategies = [s for s in STRATEGY_MAP.keys() if s not in builtin_strategies]
+    total = len(available_strategies)
+    
+    print(f"🚀 Starting Batch Task for {total} strategies on {symbol}")
+
+    for i, strategy_name in enumerate(available_strategies):
+        # ১. প্রোগ্রেস ক্যালকুলেশন
+        current_progress = int((i / total) * 100)
+        
+        # ২. কনসোলে প্রিন্ট (ব্যাকএন্ডে দেখার জন্য)
+        print(f"🔄 [{i+1}/{total}] Testing {strategy_name}... ({current_progress}%)", flush=True)
+
+        # ৩. Celery স্টেট আপডেট
+        self.update_state(
+            state='PROGRESS',
+            meta={
+                'current': i + 1,
+                'total': total,
+                'percent': current_progress,
+                'status': f"Testing {strategy_name}..."
+            }
+        )
+        
+        # ⚠️ গুরুত্বপূর্ণ: স্টেট আপডেট যাতে ডাটাবেস/রেডিসে সেভ হওয়ার সময় পায়
+        time.sleep(0.1) 
+
+        try:
+            result = engine.run(
+                db=db,
+                symbol=symbol,
+                timeframe=timeframe,
+                strategy_name=strategy_name,
+                initial_cash=initial_cash,
+                params={}, 
+                start_date=start_date,
+                end_date=end_date,
+                commission=commission,
+                slippage=slippage
+            )
+            
+            if result.get("status") == "error":
+                errors.append({"strategy": strategy_name, "error": result.get("message", "Unknown error")})
+            else:
+                metrics = result.get('advanced_metrics', {})
+                summary = {
+                    "strategy": strategy_name,
+                    "profit_percent": clean_metric(result.get("profit_percent")),
+                    "total_trades": result["total_trades"],
+                    "final_value": clean_metric(result.get("final_value")),
+                    "win_rate": clean_metric(metrics.get('win_rate')),
+                    "max_drawdown": clean_metric(metrics.get('max_drawdown')),
+                    "sharpe_ratio": clean_metric(metrics.get('sharpe'))
+                }
+                results.append(summary)
+                
+        except Exception as e:
+            print(f"❌ Batch Error for {strategy_name}: {e}")
+            errors.append({"strategy": strategy_name, "error": str(e)})
+
+    db.close()
+    
+    # ৫. প্রফিট অনুযায়ী সর্ট করা
+    results.sort(key=lambda x: x['profit_percent'], reverse=True)
+    
+    # ফাইনাল প্রিন্ট
+    print(f"✅ Batch Task Completed! Scanned {len(results)} strategies.")
+
+    return {
+        "status": "completed",
+        "symbol": symbol,
+        "total_tested": total,
+        "results": results,
+        "errors": errors
+    }
+
 import ccxt
 import os
 import csv
-import time
+# time is already imported at top
 from datetime import datetime
 from .celery_app import celery_app
 from celery import current_task

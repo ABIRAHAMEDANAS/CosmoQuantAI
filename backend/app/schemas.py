@@ -72,6 +72,15 @@ class BacktestRequest(BaseModel):
     commission: float = 0.001
     slippage: float = 0.0
 
+class BatchBacktestRequest(BaseModel):
+    symbol: str
+    timeframe: str
+    initial_cash: float = 10000.0
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    commission: float = 0.001
+    slippage: float = 0.0
+
 class GenerateStrategyRequest(BaseModel):
     prompt: str
 

@@ -30,8 +30,9 @@ from .services.backtest_engine import BacktestEngine
 from .services import ai_service
 from .services.data_processing import convert_trades_to_candles_logic
 from celery.result import AsyncResult
-from .tasks import run_backtest_task, run_optimization_task, download_candles_task, download_trades_task
+from .tasks import run_backtest_task, run_optimization_task, download_candles_task, download_trades_task, run_batch_backtest_task
 from .celery_app import celery_app
+from app.strategies import STRATEGY_MAP
 
 UPLOAD_DIR = "app/strategies/custom"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -563,6 +564,44 @@ def run_backtest(
     )
     
     # সাথে সাথে Task ID রিটার্ন করা হবে
+    return {"task_id": task.id, "status": "Processing"}
+
+# ১.৫. ব্যাচ ব্যাকটেস্ট (সব স্ট্র্যাটেজি একসাথে)
+@app.post("/api/backtest/batch")
+def run_batch_backtest(
+    request: schemas.BatchBacktestRequest,
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    task = run_batch_backtest_task.delay(
+        symbol=request.symbol,
+        timeframe=request.timeframe,
+        initial_cash=request.initial_cash,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        commission=request.commission,
+        slippage=request.slippage
+    )
+    return {"task_id": task.id, "status": "Processing"}
+
+# --- Batch Backtest Endpoint (Synchronous) ---
+# --- Batch Backtest Endpoint (Celery ভার্সন) ---
+@app.post("/api/backtest/batch-run")
+def run_batch_backtest(
+    request: schemas.BatchBacktestRequest, # schemas.py তে এটি আগের ধাপেই যোগ করেছিলেন
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    # Celery টাস্ক কল করা হচ্ছে (.delay দিয়ে)
+    task = run_batch_backtest_task.delay(
+        symbol=request.symbol,
+        timeframe=request.timeframe,
+        initial_cash=request.initial_cash,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        commission=request.commission,
+        slippage=request.slippage
+    )
+    
+    # সাথে সাথে Task ID রিটার্ন
     return {"task_id": task.id, "status": "Processing"}
 
 # ২. টাস্ক স্ট্যাটাস চেক করার এন্ডপয়েন্ট
