@@ -4,7 +4,7 @@ import Card from '../../components/ui/Card';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     AreaChart, Area,
-    BarChart, Bar, Rectangle
+    BarChart, Bar, Rectangle, Cell, Legend
 } from 'recharts';
 import { EQUITY_CURVE_DATA, MOCK_BACKTEST_RESULTS, MOCK_STRATEGIES, MOCK_STRATEGY_PARAMS, MOCK_CUSTOM_MODELS } from '../../constants';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -23,7 +23,7 @@ import "react-datepicker/dist/react-datepicker.css";
 import MonthlyReturnsHeatmap from '../../components/ui/MonthlyReturnsHeatmap';
 import ParameterHeatmap from '../../components/ui/ParameterHeatmap';
 
-import { Activity, Layers, PlayIcon, CodeIcon, SaveIcon, UploadCloud, Download, X, AlertCircle, Settings, Info, LayoutGrid, List } from 'lucide-react';
+import { Activity, Layers, PlayIcon, CodeIcon, SaveIcon, UploadCloud, Download, X, AlertCircle, Settings, Info, LayoutGrid, List, FileText, BarChart2 } from 'lucide-react';
 
 // --- Constants ---
 const TIMEFRAME_OPTIONS: Timeframe[] = [
@@ -96,14 +96,20 @@ const AnimatedNumber: React.FC<{ value: number; decimals?: number; prefix?: stri
     );
 };
 
-const MetricCard: React.FC<{ label: string; value: number; prefix?: string; suffix?: string; positive?: boolean }> = ({ label, value, prefix = '', suffix = '', positive }) => (
-    <Card className="text-center bg-gray-50 dark:bg-brand-dark/50 transform hover:scale-105 transition-transform duration-200">
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">{label}</p>
-        <p className={`text-2xl font-bold ${positive === true ? 'text-brand-success' : positive === false ? 'text-brand-danger' : 'text-slate-900 dark:text-white'}`}>
-            <AnimatedNumber value={value} prefix={prefix} suffix={suffix} decimals={label.includes('Ratio') ? 2 : 1} />
-        </p>
-    </Card>
-);
+const MetricCard: React.FC<{ label: string; value: string | number; decimals?: number; prefix?: string; suffix?: string; positive?: boolean }> = ({ label, value, decimals = 2, prefix = '', suffix = '', positive }) => {
+    const numericValue = typeof value === 'number' ? value : parseFloat(value as string);
+    const isPositive = positive !== undefined ? positive : numericValue >= 0;
+    const colorClass = positive !== undefined ? (isPositive ? 'text-green-500' : 'text-red-500') : 'text-slate-900 dark:text-white';
+
+    return (
+        <div className="bg-white dark:bg-[#131722] p-4 rounded-lg border border-gray-200 dark:border-[#2A2E39] shadow-sm">
+            <p className="text-xs text-gray-500 uppercase font-semibold mb-1">{label}</p>
+            <p className={`text-xl font-bold ${colorClass}`}>
+                {typeof value === 'number' ? <AnimatedNumber value={value} decimals={decimals} prefix={prefix} suffix={suffix} /> : value}
+            </p>
+        </div>
+    );
+};
 
 type OptimizationParamValue = { start: number | string; end: number | string; step: number | string; };
 type OptimizationParams = Record<string, OptimizationParamValue>;
@@ -263,7 +269,7 @@ const Backtester: React.FC = () => {
     const [singleResult, setSingleResult] = useState<BacktestResult | null>(null);
     const [multiObjectiveResults, setMultiObjectiveResults] = useState<BacktestResult[] | null>(null);
     const [batchResults, setBatchResults] = useState<BacktestResult[] | null>(null);
-    const [viewMode, setViewMode] = useState<'table' | 'heatmap'>('table');
+    const [viewMode, setViewMode] = useState<'table' | 'heatmap' | 'chart'>('table');
 
     // AI Inputs
     const [aiPrompt, setAiPrompt] = useState('');
@@ -374,6 +380,41 @@ const Backtester: React.FC = () => {
     const [isConverting, setIsConverting] = useState(false);
     const [tradeFiles, setTradeFiles] = useState<string[]>([]);
     const [selectedTradeFile, setSelectedTradeFile] = useState<string>("");
+
+    // ✅ 1. Details View State
+    const [selectedBatchResult, setSelectedBatchResult] = useState<any | null>(null);
+
+    // ✅ 2. CSV Export Function
+    const handleExportCSV = () => {
+        if (!batchResults || batchResults.length === 0) {
+            showToast("No results to export", "warning");
+            return;
+        }
+
+        const headers = ["Rank", "Strategy", "Profit %", "Win Rate", "Max Drawdown", "Sharpe Ratio", "Total Trades"];
+        const rows = batchResults.map((res: any, idx: number) => [
+            idx + 1,
+            `"${res.strategy}"`,
+            res.profitPercent?.toFixed(2),
+            res.winRate?.toFixed(2) || "0",
+            res.maxDrawdown?.toFixed(2),
+            res.sharpeRatio?.toFixed(2),
+            res.total_trades
+        ]);
+
+        const csvContent = "data:text/csv;charset=utf-8,"
+            + headers.join(",") + "\n"
+            + rows.map(e => e.join(",")).join("\n");
+
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `batch_backtest_report_${new Date().toISOString().split('T')[0]}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showToast("Report downloaded successfully!", "success");
+    };
 
     const handleConvertTradesToCandles = async () => {
         if (!selectedTradeFile) {
@@ -1182,6 +1223,18 @@ const Backtester: React.FC = () => {
         );
     };
 
+    // ✅ Safe Metric Helper (এটি সব ধরণের ভ্যালু হ্যান্ডেল করবে)
+    const getSafeValue = (item: any, keys: string[]) => {
+        if (!item) return 0;
+        for (const key of keys) {
+            const val = item[key];
+            if (val !== undefined && val !== null && !isNaN(Number(val))) {
+                return Number(val);
+            }
+        }
+        return 0;
+    };
+
     return (
         <div className="space-y-8">
             {/* Header & Tabs */}
@@ -1731,75 +1784,247 @@ const Backtester: React.FC = () => {
                         {(batchResults || multiObjectiveResults) && (
                             <Card className="animate-fade-in">
                                 <div className="flex justify-between items-center mb-6">
-                                    <h2 className="text-xl font-bold text-purple-400">
-                                        {batchResults ? 'Batch Results' : 'Optimization Report'}
-                                    </h2>
+                                    <div className="flex items-center gap-3">
+                                        <h2 className="text-xl font-bold text-purple-400">
+                                            {batchResults ? 'Strategy Performance Leaderboard' : 'Optimization Report'}
+                                        </h2>
+                                        {/* ✅ 3. Export Button */}
+                                        <Button size="sm" variant="outline" onClick={handleExportCSV} className="flex items-center gap-2">
+                                            <FileText size={14} /> Export CSV
+                                        </Button>
+                                    </div>
 
-                                    {/* View Switcher Toggle */}
+                                    {/* View Switcher */}
                                     <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
-                                        <button
-                                            onClick={() => setViewMode('table')}
-                                            className={`p-2 rounded-md transition-all ${viewMode === 'table' ? 'bg-white dark:bg-brand-primary text-brand-primary dark:text-white shadow' : 'text-gray-400 hover:text-gray-600'}`}
-                                            title="Table View"
-                                        >
+                                        <button onClick={() => setViewMode('table')} className={`p-2 rounded-md ${viewMode === 'table' ? 'bg-white dark:bg-brand-primary text-brand-primary dark:text-white shadow' : 'text-gray-400'}`} title="Table View">
                                             <List size={18} />
                                         </button>
-                                        <button
-                                            onClick={() => setViewMode('heatmap')}
-                                            className={`p-2 rounded-md transition-all ${viewMode === 'heatmap' ? 'bg-white dark:bg-brand-primary text-brand-primary dark:text-white shadow' : 'text-gray-400 hover:text-gray-600'}`}
-                                            title="Heatmap View"
-                                        >
+                                        <button onClick={() => setViewMode('heatmap')} className={`p-2 rounded-md ${viewMode === 'heatmap' ? 'bg-white dark:bg-brand-primary text-brand-primary dark:text-white shadow' : 'text-gray-400'}`} title="Heatmap View">
                                             <LayoutGrid size={18} />
+                                        </button>
+                                        {/* Chart View Button */}
+                                        <button onClick={() => setViewMode('chart')} className={`p-2 rounded-md ${viewMode === 'chart' ? 'bg-white dark:bg-brand-primary text-brand-primary dark:text-white shadow' : 'text-gray-400'}`} title="Chart Comparison">
+                                            <BarChart2 size={18} />
                                         </button>
                                     </div>
                                 </div>
 
+                                {/* ✅ 1. Strategy Comparison Chart Section */}
+                                {viewMode === 'chart' && batchResults && batchResults.length > 0 && (
+                                    <div
+                                        className="mb-8 bg-[#131722] p-4 rounded-lg border border-[#2A2E39]"
+                                        style={{ width: '100%', height: '350px', minHeight: '350px' }}
+                                    >
+                                        <h3 className="text-sm font-semibold text-gray-400 mb-4 ml-2">Profitability Comparison</h3>
+
+                                        <div style={{ width: '100%', height: '100%' }}>
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={batchResults} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" stroke="#2A2E39" vertical={false} />
+                                                    <XAxis
+                                                        dataKey="strategy"
+                                                        tick={{ fill: '#9CA3AF', fontSize: 11 }}
+                                                        interval={0}
+                                                        angle={-45}
+                                                        textAnchor="end"
+                                                        height={60}
+                                                    />
+                                                    <YAxis tick={{ fill: '#9CA3AF', fontSize: 11 }} />
+                                                    <Tooltip
+                                                        cursor={{ fill: '#2A2E39', opacity: 0.4 }}
+                                                        contentStyle={{ backgroundColor: '#1F2937', borderColor: '#374151', color: '#fff' }}
+                                                        formatter={(value: any, name: any, props: any) => {
+                                                            // ✅ ফিক্স: Tooltip এ Safe Value
+                                                            const val = getSafeValue(props.payload, ['profitPercent', 'profit_percent']);
+                                                            return [`${val.toFixed(2)}%`, 'Profit'];
+                                                        }}
+                                                    />
+                                                    <Bar dataKey="profitPercent" radius={[4, 4, 0, 0]}>
+                                                        {batchResults.map((entry: any, index: number) => {
+                                                            // ✅ ফিক্স: Cell Color এ Safe Value
+                                                            const val = getSafeValue(entry, ['profitPercent', 'profit_percent']);
+                                                            return (
+                                                                <Cell
+                                                                    key={`cell-${index}`}
+                                                                    fill={val >= 0 ? '#10B981' : '#EF4444'}
+                                                                />
+                                                            );
+                                                        })}
+                                                    </Bar>
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+                                )}
+
                                 {viewMode === 'heatmap' ? (
-                                    /* 🔥 HEATMAP VIEW 🔥 */
                                     <ParameterHeatmap results={(batchResults || multiObjectiveResults) || []} />
-                                ) : (
-                                    /* 📋 TABLE VIEW (Existing Code) */
-                                    <div className="overflow-x-auto">
-                                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                                            <thead className="bg-gray-50 dark:bg-gray-900">
-                                                <tr>
-                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Strategy</th>
-                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Profit %</th>
-                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Win Rate</th>
-                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Drawdown</th>
-                                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Trades</th>
+                                ) : viewMode === 'table' ? (
+                                    <div className="overflow-x-auto custom-scrollbar">
+                                        <table className="w-full text-left text-sm">
+                                            <thead className="bg-gray-100 dark:bg-gray-900 text-gray-500 uppercase">
+                                                <tr className="border-b border-gray-200 dark:border-gray-700">
+                                                    <th className="px-4 py-3">Rank</th>
+                                                    <th className="px-4 py-3">Strategy</th>
+                                                    <th className="px-4 py-3">Profit %</th>
+                                                    <th className="px-4 py-3">Sharpe</th>
+                                                    <th className="px-4 py-3">Max DD</th>
+                                                    <th className="px-4 py-3">Trades</th>
+                                                    <th className="px-4 py-3 text-center">Details</th>
                                                 </tr>
                                             </thead>
-                                            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                                                {batchResults.map((res: any, idx) => (
-                                                    <tr key={idx} className={(res?.profit_percent || 0) > 0 ? "bg-green-50 dark:bg-green-900/10" : ""}>
-                                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
-                                                            {res?.strategy || "Unknown Strategy"}
-                                                        </td>
-                                                        <td className={`px-6 py-4 whitespace-nowrap text-sm font-bold ${(res?.profit_percent || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                                            {res?.profit_percent?.toFixed(2) || "0.00"}%
-                                                        </td>
-                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                                                            {res?.win_rate?.toFixed(2) || "0.00"}%
-                                                        </td>
-                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-red-500">
-                                                            {res?.max_drawdown?.toFixed(2) || "0.00"}%
-                                                        </td>
-                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-300">
-                                                            {res?.total_trades || 0}
-                                                        </td>
-                                                    </tr>
-                                                ))}
+                                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                                                {(batchResults || multiObjectiveResults)?.map((res: any, idx: number) => {
+                                                    // ✅ ফিক্স: দুই ধরণের কি (Key) চেক করা হচ্ছে
+                                                    const profit = getSafeValue(res, ['profitPercent', 'profit_percent']);
+                                                    const sharpe = getSafeValue(res, ['sharpeRatio', 'sharpe_ratio']);
+                                                    const drawdown = getSafeValue(res, ['maxDrawdown', 'max_drawdown']);
+                                                    const trades = getSafeValue(res, ['total_trades', 'totalTrades']);
+
+                                                    return (
+                                                        <tr
+                                                            key={idx}
+                                                            className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer group"
+                                                            onClick={() => setSelectedBatchResult(res)}
+                                                        >
+                                                            <td className="px-4 py-3 font-bold text-gray-500">#{idx + 1}</td>
+                                                            <td className="px-4 py-3 font-medium text-slate-900 dark:text-white group-hover:text-brand-primary transition-colors">
+                                                                {res.strategy || "Unknown"}
+                                                            </td>
+
+                                                            <td className={`px-4 py-3 font-bold ${profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                                                {profit.toFixed(2)}%
+                                                            </td>
+
+                                                            <td className="px-4 py-3 font-mono">
+                                                                {sharpe.toFixed(2)}
+                                                            </td>
+
+                                                            <td className="px-4 py-3 text-red-500">
+                                                                -{Math.abs(drawdown).toFixed(2)}%
+                                                            </td>
+
+                                                            <td className="px-4 py-3 text-gray-500">{trades}</td>
+                                                            <td className="px-4 py-3 text-center">
+                                                                <button className="text-brand-primary hover:underline text-xs">View Chart</button>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
                                             </tbody>
                                         </table>
                                     </div>
-                                )}
+                                ) : null}
                             </Card>
                         )}
                     </>
                 )
             }
 
+
+            {/* ✅ 2. DETAILED VIEW MODAL */}
+            {selectedBatchResult && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
+                    <Card className="w-full max-w-6xl h-[90vh] flex flex-col relative overflow-hidden">
+                        {/* Modal Header */}
+                        <div className="flex justify-between items-center border-b border-gray-200 dark:border-gray-700 pb-4 mb-4">
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                    <Activity className="text-brand-primary" />
+                                    {selectedBatchResult.strategy} Analysis
+                                </h2>
+                                <p className="text-sm text-gray-500">
+                                    {selectedBatchResult.market} • {selectedBatchResult.timeframe} • {selectedBatchResult.profitPercent.toFixed(2)}% Profit
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setSelectedBatchResult(null)}
+                                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
+                            >
+                                <X size={24} className="text-gray-500" />
+                            </button>
+                        </div>
+
+                        {/* Scrollable Content */}
+                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-6 pr-2">
+                            {/* Chart */}
+                            <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg p-1 h-[400px]">
+                                {selectedBatchResult.candle_data && selectedBatchResult.candle_data.length > 0 ? (
+                                    <BacktestChart
+                                        data={selectedBatchResult.candle_data}
+                                        trades={selectedBatchResult.trades_log || []}
+                                    />
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                                        <AlertCircle size={32} className="mb-2 opacity-50" />
+                                        <p>Chart data not available for this run.</p>
+                                        <p className="text-xs mt-1">(Run a single backtest to see detailed charts)</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Metrics Grid (Safe Version) */}
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <MetricCard
+                                    label="Net Profit"
+                                    value={getSafeValue(selectedBatchResult, ['final_value']) - getSafeValue(selectedBatchResult, ['initial_cash', 'initialCash']) || 0}
+                                    prefix="$"
+                                    positive={getSafeValue(selectedBatchResult, ['profitPercent', 'profit_percent']) >= 0}
+                                />
+                                <MetricCard
+                                    label="Total Trades"
+                                    value={getSafeValue(selectedBatchResult, ['total_trades', 'totalTrades'])}
+                                    decimals={0}
+                                />
+                                <MetricCard
+                                    label="Win Rate"
+                                    value={getSafeValue(selectedBatchResult, ['winRate', 'win_rate'])}
+                                    suffix="%"
+                                />
+                                <MetricCard
+                                    label="Max Drawdown"
+                                    value={getSafeValue(selectedBatchResult, ['maxDrawdown', 'max_drawdown'])}
+                                    suffix="%"
+                                    positive={false}
+                                />
+                            </div>
+
+                            {/* Trade Log */}
+                            {selectedBatchResult.trades_log && selectedBatchResult.trades_log.length > 0 && (
+                                <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg">
+                                    <div className="px-4 py-3 bg-[#1e222d] border-b border-[#2A2E39]">
+                                        <h3 className="text-sm font-semibold text-gray-200">Recent Trades</h3>
+                                    </div>
+                                    <div className="max-h-[250px] overflow-y-auto custom-scrollbar">
+                                        <table className="w-full text-xs text-left">
+                                            <thead className="bg-[#1e222d] text-gray-400 sticky top-0">
+                                                <tr>
+                                                    <th className="px-4 py-2">Type</th>
+                                                    <th className="px-4 py-2">Price</th>
+                                                    <th className="px-4 py-2 text-right">P/L</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {selectedBatchResult.trades_log.map((trade: any, idx: number) => (
+                                                    <tr key={idx} className="border-b border-[#2A2E39] hover:bg-[#2A2E39]">
+                                                        <td className={`px-4 py-2 font-bold ${trade.side === 'BUY' ? 'text-green-500' : 'text-red-500'}`}>
+                                                            {trade.side}
+                                                        </td>
+                                                        <td className="px-4 py-2 font-mono text-gray-300">{trade.price.toFixed(2)}</td>
+                                                        <td className={`px-4 py-2 text-right font-mono ${trade.pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                                            {trade.pnl ? trade.pnl.toFixed(2) : '-'}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </Card>
+                </div>
+            )}
 
             {/* DOWNLOAD MODAL */}
             {
