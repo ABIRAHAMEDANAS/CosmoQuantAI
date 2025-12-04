@@ -1657,19 +1657,19 @@ const Backtester: React.FC = () => {
                                         </button>
                                     </div>
 
-                                    {/* Metrics Grid */}
+                                    {/* Metrics Grid (Fixed & Safe) */}
                                     <div className="p-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
 
                                         {/* 1. Net Profit */}
                                         <div className="flex flex-col">
                                             <span className="text-xs text-gray-400 mb-1">Net Profit</span>
                                             <div className="flex items-baseline gap-2">
-                                                <span className={`text-xl font-bold font-mono ${singleResult.profitPercent && singleResult.profitPercent >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
-                                                    {singleResult.profitPercent && singleResult.profitPercent >= 0 ? '+' : ''}
+                                                <span className={`text-xl font-bold font-mono ${getSafeValue(singleResult, ['profitPercent', 'profit_percent']) >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
+                                                    {getSafeValue(singleResult, ['profitPercent', 'profit_percent']) >= 0 ? '+' : ''}
                                                     ${((singleResult.final_value || 0) - (singleResult.initial_cash || 10000)).toFixed(2)}
                                                 </span>
-                                                <span className={`text-xs ${singleResult.profitPercent && singleResult.profitPercent >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
-                                                    ({singleResult.profitPercent}%)
+                                                <span className={`text-xs ${getSafeValue(singleResult, ['profitPercent', 'profit_percent']) >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
+                                                    ({getSafeValue(singleResult, ['profitPercent', 'profit_percent']).toFixed(2)}%)
                                                 </span>
                                             </div>
                                         </div>
@@ -1678,7 +1678,7 @@ const Backtester: React.FC = () => {
                                         <div className="flex flex-col">
                                             <span className="text-xs text-gray-400 mb-1">Total Trades</span>
                                             <span className="text-xl font-bold text-gray-100 font-mono">
-                                                {singleResult.total_trades}
+                                                {getSafeValue(singleResult, ['total_trades', 'totalTrades'])}
                                             </span>
                                         </div>
 
@@ -1686,7 +1686,7 @@ const Backtester: React.FC = () => {
                                         <div className="flex flex-col">
                                             <span className="text-xs text-gray-400 mb-1">Percent Profitable</span>
                                             <span className="text-xl font-bold text-gray-100 font-mono">
-                                                {singleResult.winRate ? singleResult.winRate.toFixed(2) : singleResult.advanced_metrics?.win_rate?.toFixed(2)}%
+                                                {getSafeValue(singleResult, ['winRate', 'win_rate', 'win_ratio']).toFixed(2)}%
                                             </span>
                                         </div>
 
@@ -1694,7 +1694,7 @@ const Backtester: React.FC = () => {
                                         <div className="flex flex-col">
                                             <span className="text-xs text-gray-400 mb-1">Profit Factor</span>
                                             <span className="text-xl font-bold text-gray-100 font-mono">
-                                                {singleResult.advanced_metrics?.profit_factor?.toFixed(2) || 'N/A'}
+                                                {getSafeValue(singleResult, ['profitFactor', 'profit_factor']).toFixed(2)}
                                             </span>
                                         </div>
 
@@ -1702,7 +1702,7 @@ const Backtester: React.FC = () => {
                                         <div className="flex flex-col">
                                             <span className="text-xs text-gray-400 mb-1">Max Drawdown</span>
                                             <span className="text-xl font-bold text-[#F23645] font-mono">
-                                                {singleResult.maxDrawdown?.toFixed(2)}%
+                                                {getSafeValue(singleResult, ['maxDrawdown', 'max_drawdown']).toFixed(2)}%
                                             </span>
                                         </div>
 
@@ -1710,7 +1710,7 @@ const Backtester: React.FC = () => {
                                         <div className="flex flex-col">
                                             <span className="text-xs text-gray-400 mb-1">Sharpe Ratio</span>
                                             <span className="text-xl font-bold text-[#2962FF] font-mono">
-                                                {singleResult.sharpeRatio?.toFixed(2)}
+                                                {getSafeValue(singleResult, ['sharpeRatio', 'sharpe_ratio']).toFixed(2)}
                                             </span>
                                         </div>
                                     </div>
@@ -1934,7 +1934,10 @@ const Backtester: React.FC = () => {
                                     {selectedBatchResult.strategy} Analysis
                                 </h2>
                                 <p className="text-sm text-gray-500">
-                                    {selectedBatchResult.market} • {selectedBatchResult.timeframe} • {selectedBatchResult.profitPercent.toFixed(2)}% Profit
+                                    {selectedBatchResult.market} • {selectedBatchResult.timeframe} •
+                                    <span className={getSafeValue(selectedBatchResult, ['profitPercent', 'profit_percent']) >= 0 ? "text-green-500 ml-1" : "text-red-500 ml-1"}>
+                                        {getSafeValue(selectedBatchResult, ['profitPercent', 'profit_percent']).toFixed(2)}% Profit
+                                    </span>
                                 </p>
                             </div>
                             <button
