@@ -62,7 +62,7 @@ services:
 
   # 5. Database Service
   db:
-    image: postgres:17-alpine
+    image: timescale/timescaledb-ha:pg16
     container_name: cosmoquant_db
     restart: always
     environment:
@@ -72,7 +72,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/home/postgres/pgdata/data
 
 volumes:
   postgres_data:

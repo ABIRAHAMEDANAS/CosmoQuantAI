@@ -1,12 +1,13 @@
 import ccxt.async_support as ccxt
 import ccxt as ccxt_sync 
 from sqlalchemy.orm import Session
+from sqlalchemy.dialects.postgresql import insert # ✅ এই ইমপোর্টটি খুব গুরুত্বপূর্ণ
 from datetime import datetime, timedelta
 from app import models
 from app.constants import VALID_TIMEFRAMES 
 import asyncio
-from tqdm import tqdm  # ✅ কনসোল প্রোগ্রেস বারের জন্য
-from app.services.websocket_manager import manager # ✅ ওয়েব সকেট ম্যানেজার
+from tqdm import tqdm
+from app.services.websocket_manager import manager
 
 class MarketService:
     def __init__(self):
@@ -67,7 +68,6 @@ class MarketService:
             # মোট কত সময় বাকি তা হিসাব করা (প্রোগ্রেস এর জন্য)
             total_duration = end_ts - since_ts
             
-            # ✅ TQDM এবং WebSocket লজিক শুরু
             with tqdm(total=total_duration, desc=f"Syncing {symbol}", unit="ms") as pbar:
                 while current_since < end_ts:
                     try:
@@ -88,14 +88,14 @@ class MarketService:
 
                     last_time = filtered_ohlcv[-1][0]
                     
-                    # ✅ প্রোগ্রেস ক্যালকুলেশন
+                    # প্রোগ্রেস ক্যালকুলেশন
                     progress_percent = int(((last_time - since_ts) / total_duration) * 100)
-                    progress_percent = min(100, max(0, progress_percent)) # 0-100 এর মধ্যে রাখা
+                    progress_percent = min(100, max(0, progress_percent))
 
-                    # ✅ TQDM আপডেট (ব্যাকএন্ড কনসোলে)
+                    # TQDM আপডেট
                     pbar.update(last_time - current_since)
 
-                    # ✅ ফ্রন্টএন্ডে WebSocket মেসেজ পাঠানো
+                    # WebSocket মেসেজ পাঠানো
                     await manager.broadcast({
                         "type": "sync_progress",
                         "percent": progress_percent,
@@ -108,10 +108,10 @@ class MarketService:
                     else:
                         current_since = last_time + tf_ms
                     
-                    # ✅ ইভেন্ট লুপ ব্লক না করার জন্য ছোট বিরতি
+                    # ইভেন্ট লুপ ব্লক না করার জন্য ছোট বিরতি
                     await asyncio.sleep(0.1)
 
-            # ✅ ফাইনাল ১০০% মেসেজ পাঠানো
+            # ফাইনাল ১০০% মেসেজ পাঠানো
             await manager.broadcast({
                 "type": "sync_progress",
                 "percent": 100,
@@ -130,36 +130,46 @@ class MarketService:
         finally:
             await exchange.close()
 
+    # ✅ আপডেটেড _save_candles মেথড (বাল্ক ইনসার্ট)
     def _save_candles(self, db: Session, ohlcv: list, symbol: str, timeframe: str):
-        candles_to_insert = []
+        if not ohlcv:
+            return 0
+            
+        candles_data = []
         for candle in ohlcv:
             timestamp_ms = candle[0]
             dt_object = datetime.fromtimestamp(timestamp_ms / 1000.0)
             
-            existing = db.query(models.MarketData.id).filter(
-                models.MarketData.symbol == symbol,
-                models.MarketData.timeframe == timeframe,
-                models.MarketData.timestamp == dt_object
-            ).first()
+            candles_data.append({
+                "exchange": "binance",
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "timestamp": dt_object,
+                "open": candle[1],
+                "high": candle[2],
+                "low": candle[3],
+                "close": candle[4],
+                "volume": candle[5]
+            })
 
-            if not existing:
-                candles_to_insert.append(models.MarketData(
-                    exchange='binance',
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    timestamp=dt_object,
-                    open=candle[1],
-                    high=candle[2],
-                    low=candle[3],
-                    close=candle[4],
-                    volume=candle[5]
-                ))
+        if candles_data:
+            # PostgreSQL Efficient Upsert (DO NOTHING on Conflict)
+            stmt = insert(models.MarketData).values(candles_data)
+            
+            # প্রাইমারি কি (exchange, symbol, timeframe, timestamp) মিলে গেলে ইগনোর করবে
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=['exchange', 'symbol', 'timeframe', 'timestamp']
+            )
+            
+            try:
+                db.execute(stmt)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                print(f"Bulk Insert Error: {e}")
+                return 0
         
-        if candles_to_insert:
-            db.bulk_save_objects(candles_to_insert)
-            db.commit()
-        
-        return len(candles_to_insert)
+        return len(candles_data)
 
     async def get_exchange_markets(self, exchange_id: str):
         if exchange_id in self._markets_cache:
