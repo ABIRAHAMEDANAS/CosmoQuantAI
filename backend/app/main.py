@@ -73,16 +73,40 @@ app.add_middleware(
 # ✅ ১. কাস্টম লগ ফিল্টার ক্লাস
 class EndpointFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        # যদি লগের মেসেজে এই পাথটি থাকে, তবে False রিটার্ন করবে (প্রিন্ট হবে না)
         return record.getMessage().find("/api/backtest/status") == -1
 
+# --- 🔥 গ্লোবাল এক্সচেঞ্জ ক্লায়েন্ট (Singleton) ---
+exchange_client = None
+
 @app.on_event("startup")
-def startup_event():
+async def startup_event():
+    # ১. লগার ফিল্টার সেটআপ
+    logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
+    
+    # ২. ডাটাবেস চেক (অপশনাল)
     db = database.SessionLocal()
     db.close()
-    
-    # ✅ ২. Uvicorn এর এক্সেস লগারের সাথে ফিল্টারটি জুড়ে দেওয়া
-    logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
+
+    # ৩. 🔥 এক্সচেঞ্জ একবার কানেক্ট এবং লোড করা
+    global exchange_client
+    try:
+        exchange_client = ccxt.binance({
+            'enableRateLimit': True,
+            'timeout': 30000,  # টাইমআউট বাড়িয়ে ৩০ সেকেন্ড করা হলো
+        })
+        # ব্যাকগ্রাউন্ডে মার্কেট লোড করা (যাতে প্রথম রিকোয়েস্টে দেরি না হয়)
+        await exchange_client.load_markets()
+        print("✅ Binance Exchange Connected & Markets Loaded Globally!")
+    except Exception as e:
+        print(f"⚠️ Warning: Could not connect to Binance on startup: {e}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    # সার্ভার বন্ধ হলে কানেকশন ক্লোজ করা
+    global exchange_client
+    if exchange_client:
+        await exchange_client.close()
+        print("🛑 Binance Connection Closed.")
 
 # ডাটাবেস সেশন ডিপেন্ডেন্সি
 def get_db():
@@ -308,21 +332,23 @@ async def upload_market_data(file: UploadFile = File(...), current_user: models.
     }
 
 # WebSocket এন্ডপয়েন্ট
-# --- ✅ WebSocket Endpoint (Real-time Market Data) [UPDATED] ---
+# --- ✅ WebSocket Endpoint (Optimized with Global Exchange) ---
 @app.websocket("/ws/market-data/{symbol}")
 async def websocket_endpoint(websocket: WebSocket, symbol: str):
     await manager.connect(websocket)
     
-    # এক্সচেঞ্জ কানেকশন তৈরি (Binance)
-    exchange = ccxt.binance({
-        'enableRateLimit': True,
-    })
+    # 🔥 গ্লোবাল এক্সচেঞ্জ ব্যবহার করা হচ্ছে (বারবার কানেক্ট হবে না)
+    global exchange_client
     
+    # যদি কোনো কারণে স্টার্টআপে কানেক্ট না হয়, তবে এখানে আবার চেষ্টা করবে
+    if not exchange_client:
+        exchange_client = ccxt.binance({'enableRateLimit': True})
+
     try:
         while True:
             try:
                 # ১. রিয়েল মার্কেট ডাটা ফেচ করা
-                ticker = await exchange.fetch_ticker(symbol)
+                ticker = await exchange_client.fetch_ticker(symbol)
                 
                 # ২. ডাটা ফরম্যাট করা
                 price = ticker.get('last')
@@ -343,18 +369,17 @@ async def websocket_endpoint(websocket: WebSocket, symbol: str):
                 
             except ccxt.NetworkError as e:
                 print(f"WS Network Error: {e}")
-                await asyncio.sleep(5)
+                await asyncio.sleep(5) 
             except ccxt.ExchangeError as e:
+                # এক্সচেঞ্জ স্পেসিফিক এরর
                 print(f"WS Exchange Error: {e}")
                 await websocket.send_json({"error": str(e)})
                 await asyncio.sleep(5)
             except Exception as e:
-                # 🔴 FIX: যদি কানেকশন ক্লোজ এরর হয়, তবে লুপ ব্রেক করুন
+                # কানেকশন ক্লোজ এরর হ্যান্ডলিং
                 error_msg = str(e)
                 if "Cannot call \"send\" once a close message has been sent" in error_msg:
-                    print(f"Client disconnected normally from {symbol}")
-                    break  # লুপ থামিয়ে দিন
-                
+                    break  
                 print(f"WS Unexpected Error: {e}")
                 await asyncio.sleep(1)
             
@@ -367,7 +392,7 @@ async def websocket_endpoint(websocket: WebSocket, symbol: str):
         print(f"Critical WebSocket Error: {e}")
     finally:
         manager.disconnect(websocket)
-        await exchange.close()
+        # ⚠️ এখানে exchange.close() কল করবেন না, কারণ এটি গ্লোবাল ইনস্ট্যান্স!
 
 # ✅ নতুন: সাধারণ WebSocket এন্ডপয়েন্ট (Progress Updates এর জন্য)
 @app.websocket("/ws")
