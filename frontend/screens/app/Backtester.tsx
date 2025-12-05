@@ -2062,6 +2062,26 @@ const Backtester: React.FC = () => {
                                 />
                             </div>
 
+                            {/* ✅ NEW: Parameter Configuration Section (Fix for displaying settings) */}
+                            {selectedBatchResult.params && Object.keys(selectedBatchResult.params).length > 0 && (
+                                <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg p-4 mb-4 mt-4">
+                                    <div className="flex items-center gap-2 mb-3 border-b border-[#2A2E39] pb-2">
+                                        <Settings className="h-4 w-4 text-yellow-500" />
+                                        <h3 className="text-sm font-semibold text-gray-200">Winning Strategy Parameters</h3>
+                                    </div>
+                                    <div className="flex flex-wrap gap-3">
+                                        {Object.entries(selectedBatchResult.params).map(([key, value]) => (
+                                            <div key={key} className="flex flex-col bg-[#1e222d] px-3 py-2 rounded border border-[#2A2E39]">
+                                                <span className="text-[10px] text-gray-500 uppercase font-bold">{key}</span>
+                                                <span className="text-sm font-mono text-yellow-400 font-bold">
+                                                    {typeof value === 'number' ? value.toString() : String(value)}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Trade Log */}
                             {selectedBatchResult.trades_log && selectedBatchResult.trades_log.length > 0 && (
                                 <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg">

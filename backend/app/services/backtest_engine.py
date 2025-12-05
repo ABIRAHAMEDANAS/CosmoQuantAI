@@ -19,7 +19,7 @@ qs.extend_pandas()
 
 market_service = MarketService()
 
-# ✅ 1. Progress Observer (As before)
+# ✅ 1. Progress Observer
 class ProgressObserver(bt.Observer):
     lines = ('progress',)
     params = (
@@ -48,7 +48,7 @@ class FractionalPercentSizer(bt.Sizer):
         return position.size
 
 class BacktestEngine:
-    # ✅ 2. Updated run method to accept Real Execution Params
+    
     def run(self, db: Session, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, custom_data_file: str = None, progress_callback=None, 
             commission: float = 0.001, slippage: float = 0.0):
         
@@ -85,7 +85,6 @@ class BacktestEngine:
         if df is None:
             candles = market_service.get_candles_from_db(db, symbol, timeframe, start_date, end_date)
             
-            # Auto-resampling logic
             if not candles or len(candles) < 20:
                 if timeframe == '45m':
                     base_timeframe = '15m'
@@ -109,7 +108,6 @@ class BacktestEngine:
             } for c in candles])
             df.set_index('datetime', inplace=True)
 
-        # Clean params
         clean_params = {}
         for k, v in params.items():
             try: clean_params[k] = int(v)
@@ -117,7 +115,6 @@ class BacktestEngine:
                 try: clean_params[k] = float(v)
                 except: clean_params[k] = v
 
-        # Backtrader setup
         cerebro = bt.Cerebro()
         data_feed = bt.feeds.PandasData(dataname=df)
         
@@ -133,14 +130,12 @@ class BacktestEngine:
         else:
             cerebro.adddata(data_feed)
 
-        # Progress Observer
         if progress_callback:
             total_candles = len(df)
             if resample_compression > 1:
                 total_candles = total_candles // resample_compression
             cerebro.addobserver(ProgressObserver, total_len=total_candles, callback=progress_callback)
 
-        # Strategy Loading
         strategy_class = self._load_strategy_class(strategy_name)
         if not strategy_class:
             return {"error": f"Strategy '{strategy_name}' not found via Map or File."}
@@ -148,30 +143,23 @@ class BacktestEngine:
         valid_params = self._filter_params(strategy_class, clean_params)
         cerebro.addstrategy(strategy_class, **valid_params)
 
-        # ✅ REALISTIC EXECUTION CONFIGURATION
         cerebro.broker.setcash(initial_cash)
-        cerebro.broker.setcommission(commission=commission) # e.g., 0.001 for 0.1%
-        
-        # Slippage: Impact of market liquidity
+        cerebro.broker.setcommission(commission=commission)
         if slippage > 0:
             cerebro.broker.set_slippage_perc(perc=slippage)
         
         cerebro.addsizer(FractionalPercentSizer, percents=90)
         
-        # Add analyzers
         cerebro.addanalyzer(bt.analyzers.PyFolio, _name='pyfolio')
         cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trades")
         cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
 
-        # Run backtest
         start_value = cerebro.broker.getvalue()
         results = cerebro.run() 
         first_strat = results[0]
         end_value = cerebro.broker.getvalue()
 
-        # Metrics Calculation
         qs_metrics = self._calculate_metrics(first_strat, start_value, end_value)
-        
         executed_trades = getattr(first_strat, 'trade_history', [])
         
         df['time'] = df.index.astype('int64') // 10**9 
@@ -196,11 +184,9 @@ class BacktestEngine:
             "candle_data": chart_candles 
         }
 
-    # ✅ 3. Updated optimize method to pass commission & slippage
     def optimize(self, db: Session, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, method="grid", population_size=50, generations=10, progress_callback=None, abort_callback=None,
                  commission: float = 0.001, slippage: float = 0.0):
         
-        # ... (Data Fetching Logic same as before) ...
         candles = market_service.get_candles_from_db(db, symbol, timeframe, start_date, end_date)
         
         if not candles or len(candles) < 20:
@@ -222,7 +208,6 @@ class BacktestEngine:
         } for c in candles])
         df.set_index('datetime', inplace=True)
         
-        # ... (Param parsing logic same as before) ...
         param_ranges = {} 
         fixed_params = {}
         for k, v in params.items():
@@ -251,7 +236,6 @@ class BacktestEngine:
                 if abort_callback and abort_callback(): break
                 instance_params = dict(zip(param_names, combo))
                 
-                # Pass commission and slippage here
                 metrics = self._run_single_backtest(df, strategy_name, initial_cash, instance_params, fixed_params, commission, slippage)
                 
                 metrics['params'] = instance_params
@@ -259,7 +243,6 @@ class BacktestEngine:
                 if progress_callback: progress_callback(i + 1, total)
 
         elif method == "genetic" or method == "geneticAlgorithm":
-            # Pass commission and slippage here
             results = self._run_genetic_algorithm(
                 df, strategy_name, initial_cash, param_ranges, fixed_params, 
                 pop_size=population_size, generations=generations, 
@@ -267,10 +250,10 @@ class BacktestEngine:
                 commission=commission, slippage=slippage
             )
 
+        # ✅ Sort results by Profit % Descending
         results.sort(key=lambda x: x['profitPercent'], reverse=True)
         return results
 
-    # ✅ 4. Updated Genetic Algorithm to pass execution params
     def _run_genetic_algorithm(self, df, strategy_name, initial_cash, param_ranges, fixed_params, pop_size=50, generations=10, progress_callback=None, abort_callback=None, commission=0.001, slippage=0.0):
         
         param_keys = list(param_ranges.keys())
@@ -322,7 +305,6 @@ class BacktestEngine:
         unique_results = {json.dumps(r['params'], sort_keys=True): r for r in best_results}
         return list(unique_results.values())
 
-    # ✅ 5. Updated Single Backtest Runner
     def _run_single_backtest(self, df, strategy_name, initial_cash, variable_params, fixed_params, commission=0.001, slippage=0.0):
         full_params = {**fixed_params, **variable_params}
         clean_params = {}
@@ -340,10 +322,10 @@ class BacktestEngine:
         if not strategy_class:
             return {"profitPercent": 0, "maxDrawdown": 0, "sharpeRatio": 0}
 
+        # ✅ Use Enhanced Filter Params
         valid_params = self._filter_params(strategy_class, clean_params)
         cerebro.addstrategy(strategy_class, **valid_params)
         
-        # Apply Real Execution Params
         cerebro.broker.setcash(initial_cash)
         cerebro.broker.setcommission(commission=commission)
         if slippage > 0:
@@ -392,19 +374,32 @@ class BacktestEngine:
                 print(f"Error loading custom strategy: {e}")
         return strategy_class
 
+    # ✅ FIXED: Smart Parameter Filtering (Case Insensitive & Underscore Agnostic)
     def _filter_params(self, strategy_class, params):
         valid_params = {}
         if hasattr(strategy_class, 'params') and hasattr(strategy_class.params, '_getkeys'):
             allowed_keys = strategy_class.params._getkeys()
+            
+            # Create a normalized map: "rsiperiod" -> "rsi_period"
+            normalized_allowed = {k.lower().replace('_', ''): k for k in allowed_keys}
+            
             for k, v in params.items():
+                # Direct match
                 if k in allowed_keys:
                     valid_params[k] = v
+                else:
+                    # Fuzzy match (Case insensitive check)
+                    norm_k = k.lower().replace('_', '')
+                    if norm_k in normalized_allowed:
+                        real_key = normalized_allowed[norm_k]
+                        valid_params[real_key] = v
+                    else:
+                        print(f"⚠️ Warning: Parameter '{k}' ignored (Not found in strategy params).")
         else:
             valid_params = params
         return valid_params
 
     def _calculate_metrics(self, first_strat, start_value, end_value):
-        # Default values
         qs_metrics = {
             "sharpe": 0, "sortino": 0, "max_drawdown": 0, "win_rate": 0, 
             "profit_factor": 0, "cagr": 0, "volatility": 0, "calmar": 0, 
@@ -419,7 +414,6 @@ class BacktestEngine:
             returns, positions, transactions, gross_lev = portfolio_stats.get_pf_items()
             returns.index = returns.index.tz_localize(None)
 
-            # ✅ Added more metrics here
             qs_metrics = {
                 "sharpe": qs.stats.sharpe(returns),
                 "sortino": qs.stats.sortino(returns),
@@ -427,15 +421,12 @@ class BacktestEngine:
                 "win_rate": qs.stats.win_rate(returns) * 100,
                 "profit_factor": qs.stats.profit_factor(returns),
                 "cagr": qs.stats.cagr(returns) * 100,
-                
-                # 🔥 New metrics added (previously missing)
-                "volatility": qs.stats.volatility(returns) * 100,       # Market volatility
-                "calmar": qs.stats.calmar(returns),                     # Risk-adjusted return
-                "recovery_factor": qs.stats.recovery_factor(returns),   # Ability to recover from loss
-                "expected_return": qs.stats.expected_return(returns) * 100 # Average return
+                "volatility": qs.stats.volatility(returns) * 100,
+                "calmar": qs.stats.calmar(returns),
+                "recovery_factor": qs.stats.recovery_factor(returns),
+                "expected_return": qs.stats.expected_return(returns) * 100
             }
 
-            # Heatmap Logic (Same as before)
             if not returns.empty:
                 monthly_ret_series = returns.resample('ME').apply(lambda x: (1 + x).prod() - 1)
                 for timestamp, value in monthly_ret_series.items():
@@ -446,11 +437,9 @@ class BacktestEngine:
                             "value": round(value * 100, 2)
                         })
 
-            # Underwater Logic (Same as before)
             drawdown_series = qs.stats.to_drawdown_series(returns)
             underwater_data = [{"time": int(t.timestamp()), "value": round(v * 100, 2)} for t, v in drawdown_series.items()]
 
-            # Histogram Logic (Same as before)
             clean_returns = returns.dropna()
             if not clean_returns.empty:
                 hist_values, bin_edges = np.histogram(clean_returns * 100, bins=20)
@@ -461,7 +450,6 @@ class BacktestEngine:
                             "frequency": int(hist_values[i])
                         })
         except Exception as e:
-            # print(f"Metrics Error: {e}")
             pass
             
         return {
