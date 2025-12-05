@@ -96,7 +96,7 @@ class MarketService:
                     pbar.update(last_time - current_since)
 
                     # WebSocket মেসেজ পাঠানো
-                    await manager.broadcast({
+                    await manager.broadcast_to_symbol("general", {
                         "type": "sync_progress",
                         "percent": progress_percent,
                         "status": f"Syncing {symbol}... {progress_percent}%"
@@ -112,7 +112,7 @@ class MarketService:
                     await asyncio.sleep(0.1)
 
             # ফাইনাল ১০০% মেসেজ পাঠানো
-            await manager.broadcast({
+            await manager.broadcast_to_symbol("general", {
                 "type": "sync_progress",
                 "percent": 100,
                 "status": "Sync Completed!"

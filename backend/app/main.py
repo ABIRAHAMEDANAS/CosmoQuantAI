@@ -80,6 +80,54 @@ class EndpointFilter(logging.Filter):
 # --- 🔥 গ্লোবাল এক্সচেঞ্জ ক্লায়েন্ট (Singleton) ---
 exchange_client = None
 
+# গ্লোবাল ব্যাকগ্রাউন্ড টাস্ক ফ্ল্যাগ
+bg_task_running = False
+
+# ১. ব্যাকগ্রাউন্ড টাস্ক যা Binance থেকে ডাটা আনবে এবং ম্যানেজারকে দিবে
+async def fetch_market_data_background():
+    global exchange_client
+    print("🚀 Background Market Data Task Started")
+    
+    while True:
+        try:
+            # বর্তমানে কোন কোন সিম্বল ইউজাররা দেখছে?
+            active_symbols = list(manager.active_connections.keys())
+            
+            if not active_symbols:
+                await asyncio.sleep(1)
+                continue
+
+            # Binance থেকে ওই সিম্বলগুলোর ডাটা আনা (Batch বা Loop)
+            # ভালো পারফরম্যান্সের জন্য ccxt.pro ব্যবহার করা উচিত, তবে এখানে REST দিয়ে দেখাচ্ছি
+            for symbol in active_symbols:
+                # "general" চ্যানেল বাদে বাকিগুলো চেক করা
+                if symbol == "general":
+                    continue
+                    
+                if not exchange_client:
+                     exchange_client = ccxt.binance({'enableRateLimit': True})
+                     
+                ticker = await exchange_client.fetch_ticker(symbol)
+                
+                data = {
+                    "symbol": symbol,
+                    "price": ticker.get('last'),
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "high": ticker.get('high'),
+                    "low": ticker.get('low'),
+                    "volume": ticker.get('quoteVolume')
+                }
+                
+                # 🔥 শুধুমাত্র ওই সিম্বল সাবস্ক্রাইব করা ইউজারদের ডাটা পাঠানো
+                await manager.broadcast_to_symbol(symbol, data)
+
+            # রেট লিমিট এড়াতে একটু বিরতি (১০০০ মি.সে. / সিম্বল সংখ্যা)
+            await asyncio.sleep(1)
+
+        except Exception as e:
+            print(f"Background Task Error: {e}")
+            await asyncio.sleep(5)
+
 @app.on_event("startup")
 async def startup_event():
     # ১. লগার ফিল্টার সেটআপ
@@ -99,6 +147,9 @@ async def startup_event():
         # ব্যাকগ্রাউন্ডে মার্কেট লোড করা (যাতে প্রথম রিকোয়েস্টে দেরি না হয়)
         await exchange_client.load_markets()
         print("✅ Binance Exchange Connected & Markets Loaded Globally!")
+        
+        # ব্যাকগ্রাউন্ড টাস্ক রান করা
+        asyncio.create_task(fetch_market_data_background())
     except Exception as e:
         print(f"⚠️ Warning: Could not connect to Binance on startup: {e}")
 
@@ -337,75 +388,29 @@ async def upload_market_data(file: UploadFile = File(...), current_user: models.
 # --- ✅ WebSocket Endpoint (Optimized with Global Exchange) ---
 @app.websocket("/ws/market-data/{symbol}")
 async def websocket_endpoint(websocket: WebSocket, symbol: str):
-    await manager.connect(websocket)
+    # কানেক্ট করার সময় সিম্বল বলে দিতে হবে
+    await manager.connect(websocket, symbol)
     
-    # 🔥 গ্লোবাল এক্সচেঞ্জ ব্যবহার করা হচ্ছে (বারবার কানেক্ট হবে না)
-    global exchange_client
-    
-    # যদি কোনো কারণে স্টার্টআপে কানেক্ট না হয়, তবে এখানে আবার চেষ্টা করবে
-    if not exchange_client:
-        exchange_client = ccxt.binance({'enableRateLimit': True})
-
     try:
         while True:
-            try:
-                # ১. রিয়েল মার্কেট ডাটা ফেচ করা
-                ticker = await exchange_client.fetch_ticker(symbol)
-                
-                # ২. ডাটা ফরম্যাট করা
-                price = ticker.get('last')
-                ts = ticker.get('timestamp')
-                timestamp_str = datetime.fromtimestamp(ts / 1000).isoformat() if ts else str(datetime.utcnow())
-                
-                data = {
-                    "symbol": symbol,
-                    "price": price,
-                    "timestamp": timestamp_str,
-                    "high": ticker.get('high'),
-                    "low": ticker.get('low'),
-                    "volume": ticker.get('quoteVolume') 
-                }
-                
-                # ৩. ক্লায়েন্টকে পাঠানো
-                await websocket.send_json(data)
-                
-            except ccxt.NetworkError as e:
-                print(f"WS Network Error: {e}")
-                await asyncio.sleep(5) 
-            except ccxt.ExchangeError as e:
-                # এক্সচেঞ্জ স্পেসিফিক এরর
-                print(f"WS Exchange Error: {e}")
-                await websocket.send_json({"error": str(e)})
-                await asyncio.sleep(5)
-            except Exception as e:
-                # কানেকশন ক্লোজ এরর হ্যান্ডলিং
-                error_msg = str(e)
-                if "Cannot call \"send\" once a close message has been sent" in error_msg:
-                    break  
-                print(f"WS Unexpected Error: {e}")
-                await asyncio.sleep(1)
-            
-            # ৪. API রেট লিমিট ঠিক রাখতে বিরতি
-            await asyncio.sleep(1)
+            # কানেকশন ধরে রাখার জন্য ক্লায়েন্ট থেকে পিং বা মেসেজের অপেক্ষা
+            # আমরা এখন এখান থেকে লুপ চালিয়ে ডাটা পাঠাব না
+            await websocket.receive_text()
             
     except WebSocketDisconnect:
-        print(f"Client disconnected from {symbol} stream")
-    except Exception as e:
-        print(f"Critical WebSocket Error: {e}")
-    finally:
-        manager.disconnect(websocket)
-        # ⚠️ এখানে exchange.close() কল করবেন না, কারণ এটি গ্লোবাল ইনস্ট্যান্স!
+        manager.disconnect(websocket, symbol)
+        print(f"Client disconnected from {symbol}")
 
 # ✅ নতুন: সাধারণ WebSocket এন্ডপয়েন্ট (Progress Updates এর জন্য)
 @app.websocket("/ws")
 async def websocket_general(websocket: WebSocket):
-    await manager.connect(websocket)
+    await manager.connect(websocket, "general")
     try:
         while True:
             # ক্লায়েন্ট থেকে মেসেজ শোনার জন্য অপেক্ষা (কানেকশন ধরে রাখার জন্য)
             await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        manager.disconnect(websocket, "general")
 
 
 # --- Strategy Upload Endpoint ---

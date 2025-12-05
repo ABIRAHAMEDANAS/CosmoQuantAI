@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, CandlestickSeries } from 'lightweight-charts';
+// lightweight-charts ইম্পোর্ট সরিয়ে ফেলা হয়েছে
 import apiClient from '../../services/client';
 import { useTheme } from '../../contexts/ThemeContext';
 import Card from '../../components/ui/Card';
@@ -22,6 +21,7 @@ interface OrderBookEntry {
 }
 type TradeWithStatus = Trade & { isNew?: boolean };
 
+// --- NewsTickerBar Component (অপরিবর্তিত) ---
 const NewsTickerBar: React.FC = () => {
     const [selectedNews, setSelectedNews] = useState<any>(null);
 
@@ -100,6 +100,7 @@ const NewsTickerBar: React.FC = () => {
     );
 }
 
+// --- OrderBook Component (অপরিবর্তিত) ---
 const OrderBook: React.FC<{ bids: OrderBookEntry[], asks: OrderBookEntry[], spread: number, spreadPercent: number }> = ({ bids, asks, spread, spreadPercent }) => {
     const maxTotal = Math.max(
         bids[0]?.total || 0,
@@ -109,7 +110,6 @@ const OrderBook: React.FC<{ bids: OrderBookEntry[], asks: OrderBookEntry[], spre
 
     const OrderRow: React.FC<OrderBookEntry & { type: 'bid' | 'ask' }> = ({ price, amount, total, type }) => {
         const depth = (total / maxTotal) * 100;
-        // Modern gradient depth bars
         const bgStyle = type === 'bid'
             ? { background: `linear-gradient(90deg, transparent 0%, rgba(16, 185, 129, 0.15) ${100 - depth}%, rgba(16, 185, 129, 0.3) 100%)` }
             : { background: `linear-gradient(90deg, transparent 0%, rgba(244, 63, 94, 0.15) ${100 - depth}%, rgba(244, 63, 94, 0.3) 100%)` };
@@ -152,6 +152,7 @@ const OrderBook: React.FC<{ bids: OrderBookEntry[], asks: OrderBookEntry[], spre
     );
 };
 
+// --- RecentTrades Component (অপরিবর্তিত) ---
 const RecentTrades: React.FC<{ trades: TradeWithStatus[] }> = ({ trades }) => (
     <div className="flex flex-col h-full bg-slate-50 dark:bg-brand-darkest/30 rounded-lg overflow-hidden">
         <div className="grid grid-cols-3 text-[10px] uppercase tracking-wider text-gray-400 p-2 border-b border-gray-200 dark:border-white/5 font-semibold">
@@ -171,6 +172,7 @@ const RecentTrades: React.FC<{ trades: TradeWithStatus[] }> = ({ trades }) => (
     </div>
 );
 
+// --- ConnectExchangeModal Component (অপরিবর্তিত) ---
 const ConnectExchangeModal: React.FC<{
     isOpen: boolean;
     onClose: () => void;
@@ -234,10 +236,8 @@ const ConnectExchangeModal: React.FC<{
 
 const Market: React.FC = () => {
     const { theme } = useTheme();
-    const chartContainerRef = useRef<HTMLDivElement>(null);
-    const chartInstanceRef = useRef<IChartApi | null>(null);
-    const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
 
+    // চার্ট এবং উইজেট স্টেট
     const [activePair, setActivePair] = useState('BTC/USDT');
     const [activeTimeframe, setActiveTimeframe] = useState<Timeframe>('1h');
     const [lastPrice, setLastPrice] = useState(68543.21);
@@ -267,7 +267,7 @@ const Market: React.FC = () => {
 
     const activeExchange = exchanges.find(ex => ex.id === activeExchangeId);
 
-    // ... (Resizing logic remains the same)
+    // রিসাইজিং লজিক
     const handleMouseDown = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
         setIsResizing(true);
@@ -333,13 +333,12 @@ const Market: React.FC = () => {
         setIsModalOpen(false);
     };
 
-    // ... (OrderBook and Trade generation logic same as before)
     const generateOrderBookData = (centerPrice: number): { bids: OrderBookEntry[], asks: OrderBookEntry[] } => {
         const bids: OrderBookEntry[] = [];
         const asks: OrderBookEntry[] = [];
         let currentPrice = centerPrice - 0.5;
         let totalAmount = 0;
-        for (let i = 0; i < 30; i++) { // Reduced count for better visuals
+        for (let i = 0; i < 30; i++) {
             const amount = Math.random() * 0.5;
             totalAmount += amount;
             bids.push({ price: currentPrice, amount, total: totalAmount });
@@ -356,17 +355,15 @@ const Market: React.FC = () => {
         return { bids, asks: asks.sort((a, b) => b.price - a.price) };
     };
 
-    // WebSocket এর জন্য রেফ
     const ws = useRef<WebSocket | null>(null);
 
-    // ✅ নতুন: WebSocket কানেকশন লজিক
+    // WebSocket কানেকশন (শুধুমাত্র Ticker এবং OrderBook আপডেটের জন্য রাখা হয়েছে)
+    // চার্ট এখন TradingView দ্বারা হ্যান্ডেল হবে
     useEffect(() => {
         let socket: WebSocket | null = null;
         let timeoutId: NodeJS.Timeout;
 
         const connect = () => {
-            // ১. WebSocket কানেকশন তৈরি (আপনার ব্যাকএন্ড URL অনুযায়ী)
-            // লোকালহোস্টে Docker এ ব্যাকএন্ড 8000 পোর্টে চলছে
             socket = new WebSocket(`ws://localhost:8000/ws/market-data/${activePair.replace('/', '')}`);
             ws.current = socket;
 
@@ -377,158 +374,88 @@ const Market: React.FC = () => {
             socket.onmessage = (event) => {
                 const data = JSON.parse(event.data);
 
-                // ২. রিয়েল-টাইম প্রাইস আপডেট
                 setLastPrice(prev => {
                     const newPrice = data.price;
-                    // প্রাইস বাড়লে বা কমলে কালার ইন্ডিকেটরের জন্য স্ট্যাটাস সেট করা
                     const change = newPrice - prev;
                     setPriceUpdateStatus(change > 0 ? 'up' : change < 0 ? 'down' : 'none');
                     setTimeout(() => setPriceUpdateStatus('none'), 500);
-
                     return newPrice;
                 });
 
-                // ৩. ট্রেড ফিড আপডেট (অপশনাল: রিয়েল ট্রেড ডাটা না থাকলে প্রাইস দিয়ে জেনারেট করা যেতে পারে)
-                // লাইভ এফেক্টের জন্য আমরা নতুন প্রাইস দিয়ে একটি ট্রেড অবজেক্ট বানাচ্ছি
                 const newTrade = { ...generateTrade(data.price), isNew: true };
                 setRecentTrades(prevTrades => {
-                    const updatedTrades = [newTrade, ...prevTrades.map(t => ({ ...t, isNew: false }))].slice(0, 50);
+                    const updatedTrades = [newTrade, ...prevTrades.map(t => ({ ...t, isNew: false }))].slice(50);
                     return updatedTrades;
                 });
 
-                // ৪. চার্ট আপডেট (Lightweight Charts)
-                if (candlestickSeriesRef.current) {
-                    const time = new Date(data.timestamp).getTime() / 1000 as any; // Convert to unix timestamp
-                    candlestickSeriesRef.current.update({
-                        time: time,
-                        open: data.price, // For real-time, we might just update close, but for simplicity using price
-                        high: data.price,
-                        low: data.price,
-                        close: data.price,
-                    });
-                }
+                // Note: এখানে candlestickSeriesRef এর কোড সরিয়ে ফেলা হয়েছে কারণ আমরা TradingView ব্যবহার করছি
             };
 
-            socket.onerror = (error) => {
-                console.error("WebSocket Error:", error);
-            };
-
-            socket.onclose = () => {
-                console.log("Disconnected from live feed");
-            };
+            socket.onerror = (error) => { console.error("WebSocket Error:", error); };
         };
 
-        // React Strict Mode এ ডাবল মাউন্ট এড়াতে সামান্য ডিলে
         timeoutId = setTimeout(connect, 100);
-
-        // ক্লিনআপ: কম্পোনেন্ট আনমাউন্ট বা পেয়ার চেঞ্জ হলে কানেকশন বন্ধ করা
         return () => {
             clearTimeout(timeoutId);
-            if (socket) {
-                socket.close();
-            }
+            if (socket) socket.close();
         };
-    }, [activePair]); // activePair বদলালে নতুন কানেকশন হবে
+    }, [activePair]);
 
     useEffect(() => {
         setOrderBookData(generateOrderBookData(lastPrice));
     }, [Math.round(lastPrice / 10)]);
 
-    // Chart Initialization
+    // --- TradingView Widget Implementation ---
     useEffect(() => {
-        if (!chartContainerRef.current) return;
-
-        const handleResize = () => {
-            if (chartInstanceRef.current && chartContainerRef.current) {
-                chartInstanceRef.current.applyOptions({ width: chartContainerRef.current.clientWidth });
-            }
+        // ম্যাপ টাইমফ্রেম (Local to TradingView)
+        const getTVInterval = (tf: string) => {
+            if (tf.includes('m')) return tf.replace('m', '');
+            if (tf.includes('h')) return (parseInt(tf) * 60).toString();
+            if (tf.includes('d')) return 'D';
+            if (tf.includes('w')) return 'W';
+            return '60'; // ডিফল্ট
         };
 
-        const chart = createChart(chartContainerRef.current, {
-            layout: {
-                background: { type: ColorType.Solid, color: theme === 'dark' ? '#0F172A' : '#FFFFFF' },
-                textColor: theme === 'dark' ? '#94A3B8' : '#334155',
-            },
-            grid: {
-                vertLines: { color: theme === 'dark' ? '#1E293B' : '#E2E8F0' },
-                horzLines: { color: theme === 'dark' ? '#1E293B' : '#E2E8F0' },
-            },
-            width: chartContainerRef.current.clientWidth,
-            height: chartContainerRef.current.clientHeight,
-            timeScale: {
-                timeVisible: true,
-                secondsVisible: false,
-            },
-        });
+        const createWidget = () => {
+            const containerId = isChartFullScreen ? `tv_chart_container_fullscreen_${widgetKey}` : `tv_chart_container_${widgetKey}`;
+            const container = document.getElementById(containerId);
 
-        chartInstanceRef.current = chart;
+            if (container) {
+                container.innerHTML = ''; // আগের উইজেট ক্লিয়ার করা
 
-        const candlestickSeries = chart.addSeries(CandlestickSeries, {
-            upColor: '#10B981',
-            downColor: '#F43F5E',
-            borderVisible: false,
-            wickUpColor: '#10B981',
-            wickDownColor: '#F43F5E',
-        });
-
-        candlestickSeriesRef.current = candlestickSeries;
-
-        // Fetch Historical Data
-        const fetchHistory = async () => {
-            try {
-                const response = await apiClient.get('/market-data', {
-                    params: { symbol: activePair, timeframe: activeTimeframe }
+                new window.TradingView.widget({
+                    "autosize": true,
+                    "symbol": `BINANCE:${activePair.replace('/', '')}`, // যেমন: BTC/USDT -> BINANCE:BTCUSDT
+                    "interval": getTVInterval(activeTimeframe),
+                    "timezone": "Etc/UTC",
+                    "theme": theme === 'dark' ? 'Dark' : 'Light',
+                    "style": "1",
+                    "locale": "en",
+                    "toolbar_bg": "#f1f3f6",
+                    "enable_publishing": false,
+                    "allow_symbol_change": true, // ব্যবহারকারী চাইলে পেয়ার বদলাতে পারবে
+                    "container_id": containerId,
+                    "hide_side_toolbar": false,
+                    "studies": [
+                        // ডিফল্ট কিছু ইন্ডিকেটর লোড করা যেতে পারে
+                        //"MASimple@tv-basicstudies" 
+                    ]
                 });
-
-                const formattedData = response.data.map((d: any) => ({
-                    time: new Date(d.time).getTime() / 1000,
-                    open: d.open,
-                    high: d.high,
-                    low: d.low,
-                    close: d.close,
-                }));
-
-                // Sort by time just in case
-                formattedData.sort((a: any, b: any) => a.time - b.time);
-
-                candlestickSeries.setData(formattedData);
-            } catch (error) {
-                console.error("Failed to fetch historical data", error);
             }
         };
 
-        fetchHistory();
-
-        window.addEventListener('resize', handleResize);
-
-        // ResizeObserver for container resize (e.g. split pane)
-        const resizeObserver = new ResizeObserver(() => {
-            handleResize();
-        });
-        resizeObserver.observe(chartContainerRef.current);
-
-        return () => {
-            window.removeEventListener('resize', handleResize);
-            resizeObserver.disconnect();
-            chart.remove();
+        const checkLibraryAndCreate = () => {
+            if (typeof window.TradingView !== 'undefined' && window.TradingView.widget) {
+                createWidget();
+            } else {
+                // লাইব্রেরি লোড না হওয়া পর্যন্ত অপেক্ষা
+                setTimeout(checkLibraryAndCreate, 100);
+            }
         };
-    }, [theme, activePair, activeTimeframe]);
 
-    // Update chart options when theme changes
-    useEffect(() => {
-        if (chartInstanceRef.current) {
-            chartInstanceRef.current.applyOptions({
-                layout: {
-                    background: { type: ColorType.Solid, color: theme === 'dark' ? '#0F172A' : '#FFFFFF' },
-                    textColor: theme === 'dark' ? '#94A3B8' : '#334155',
-                },
-                grid: {
-                    vertLines: { color: theme === 'dark' ? '#1E293B' : '#E2E8F0' },
-                    horzLines: { color: theme === 'dark' ? '#1E293B' : '#E2E8F0' },
-                },
-            });
-        }
-    }, [theme]);
+        checkLibraryAndCreate();
+
+    }, [theme, activePair, activeTimeframe, isChartFullScreen, widgetKey]);
 
     const change24h = lastPrice - price24hAgo;
     const changePercent24h = (change24h / price24hAgo) * 100;
@@ -561,7 +488,6 @@ const Market: React.FC = () => {
 
             {/* Market HUD */}
             <div className="flex-shrink-0 staggered-fade-in bg-white dark:bg-brand-dark rounded-2xl border border-brand-border-light dark:border-brand-border-dark p-4 shadow-lg relative overflow-hidden">
-                {/* Ambient Glow based on price movement */}
                 <div className={`absolute top-0 right-0 w-96 h-full bg-gradient-to-l ${isPositive ? 'from-emerald-500/10' : 'from-rose-500/10'} to-transparent pointer-events-none`}></div>
 
                 <div className="flex flex-wrap items-center justify-between gap-6 relative z-10">
@@ -611,7 +537,7 @@ const Market: React.FC = () => {
 
                     {/* Right: Actions */}
                     <div className="flex items-center gap-3">
-                        <Button variant="secondary" className="!p-2.5" onClick={() => {/* Add alert logic */ }}>
+                        <Button variant="secondary" className="!p-2.5" onClick={() => { }}>
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
                         </Button>
                         <Button variant="primary" className="shadow-lg shadow-brand-primary/20" onClick={() => setActiveSidePanelTab('trade')}>Trade Now</Button>
@@ -623,11 +549,11 @@ const Market: React.FC = () => {
             <div ref={containerRef} className="flex-1 flex gap-3 min-h-0 relative staggered-fade-in" style={{ animationDelay: '100ms' }}>
                 {isResizing && <div className="absolute inset-0 z-50 cursor-col-resize" />}
 
-                {/* Chart Area */}
+                {/* Chart Area (Now with TradingView) */}
                 <div className="h-full flex flex-col transition-all duration-75" style={{ width: `${leftPaneWidth}%` }}>
                     <Card className="h-full p-0 overflow-hidden border-0 shadow-xl bg-white dark:bg-brand-dark relative group flex flex-col">
-                        {/* Timeframe Toolbar */}
-                        <div className="flex items-center gap-1 p-2 border-b border-gray-200 dark:border-white/5 overflow-x-auto no-scrollbar">
+                        {/* Custom Timeframe Toolbar (Optional: TradingView has its own, but keeping this for UI consistency if needed) */}
+                        <div className="flex items-center gap-1 p-2 border-b border-gray-200 dark:border-white/5 overflow-x-auto no-scrollbar bg-white dark:bg-[#0F172A] z-10">
                             {['1m', '5m', '15m', '1h', '4h', '1d', '1w'].map((tf) => (
                                 <button
                                     key={tf}
@@ -641,8 +567,13 @@ const Market: React.FC = () => {
                                 </button>
                             ))}
                         </div>
-                        <div ref={chartContainerRef} className="flex-1 w-full min-h-0" />
-                        <button onClick={toggleFullScreen} className="absolute top-3 right-3 z-20 p-2 bg-white/10 dark:bg-black/30 backdrop-blur-sm rounded-lg text-slate-800 dark:text-white opacity-0 group-hover:opacity-100 hover:bg-white/20 dark:hover:bg-black/50 transition-all">
+
+                        {/* TradingView Container */}
+                        <div className="flex-1 w-full relative bg-white dark:bg-[#0F172A]">
+                            <div id={`tv_chart_container_${widgetKey}`} className="w-full h-full" />
+                        </div>
+
+                        <button onClick={toggleFullScreen} className="absolute top-12 right-3 z-20 p-2 bg-white/10 dark:bg-black/30 backdrop-blur-sm rounded-lg text-slate-800 dark:text-white opacity-0 group-hover:opacity-100 hover:bg-white/20 dark:hover:bg-black/50 transition-all">
                             {isChartFullScreen ? <CollapseIcon /> : <ExpandIcon />}
                         </button>
                     </Card>
@@ -656,7 +587,7 @@ const Market: React.FC = () => {
                     <div className={`h-16 w-1 rounded-full bg-gray-300 dark:bg-gray-700 group-hover:bg-brand-primary transition-colors ${isResizing ? 'bg-brand-primary' : ''}`}></div>
                 </div>
 
-                {/* Right Panel (Order Book & Trade) */}
+                {/* Right Panel (Order Book & Trade) - UNCHANGED */}
                 <div className="h-full flex flex-col gap-3" style={{ width: `calc(${100 - leftPaneWidth}% - 12px)` }}>
 
                     {/* Tab Switcher */}
@@ -677,7 +608,6 @@ const Market: React.FC = () => {
 
                     {/* Panel Content */}
                     <Card className="flex-1 flex flex-col p-0 overflow-hidden border-0 shadow-lg relative">
-                        {/* Background Ambient */}
                         {activeSidePanelTab === 'trade' && (
                             <div className={`absolute inset-0 bg-gradient-to-b ${activeGradientClass} pointer-events-none opacity-20`}></div>
                         )}
@@ -685,13 +615,11 @@ const Market: React.FC = () => {
                         <div className="flex-1 min-h-0 p-4 overflow-y-auto">
                             {activeSidePanelTab === 'trade' && (
                                 <div className="h-full flex flex-col">
-                                    {/* Buy/Sell Toggle */}
                                     <div className="flex mb-6 bg-gray-100 dark:bg-brand-darkest/50 p-1 rounded-xl">
                                         <button onClick={() => setActiveOrderFormTab('buy')} className={`flex-1 py-3 text-center font-bold rounded-lg transition-all duration-200 ${activeOrderFormTab === 'buy' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25' : 'text-gray-500 hover:bg-white/5'}`}>Buy / Long</button>
                                         <button onClick={() => setActiveOrderFormTab('sell')} className={`flex-1 py-3 text-center font-bold rounded-lg transition-all duration-200 ${activeOrderFormTab === 'sell' ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/25' : 'text-gray-500 hover:bg-white/5'}`}>Sell / Short</button>
                                     </div>
 
-                                    {/* Order Type */}
                                     <div className="flex gap-4 mb-6 overflow-x-auto pb-2 no-scrollbar">
                                         {(['Market', 'Limit', 'Stop-Limit'] as const).map(type => (
                                             <button
@@ -704,7 +632,6 @@ const Market: React.FC = () => {
                                         ))}
                                     </div>
 
-                                    {/* Inputs */}
                                     <div className="space-y-5">
                                         <div className={`transition-all duration-300 ${activeOrderType !== 'Market' ? 'opacity-100 h-auto' : 'opacity-50 h-auto grayscale'}`}>
                                             <label className="text-xs font-semibold text-gray-500 mb-1.5 block">Price (USDT)</label>
@@ -722,7 +649,6 @@ const Market: React.FC = () => {
                                             </div>
                                         </div>
 
-                                        {/* Slider */}
                                         <div className="pt-2">
                                             <div className="flex justify-between text-[10px] text-gray-400 font-mono mb-2">
                                                 <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
@@ -766,12 +692,10 @@ const Market: React.FC = () => {
                 </div>
             </div>
 
+            {/* Fullscreen Chart Modal */}
             {isChartFullScreen && (
                 <div className="fixed inset-0 z-[100] bg-white dark:bg-brand-darkest p-0 animate-modal-fade-in">
-                    {/* Fullscreen chart not implemented for lightweight-charts yet, reusing same ref logic would require moving the ref, which is complex. For now, we just show the chart in the main view. */}
-                    <div className="w-full h-full flex items-center justify-center text-gray-500">
-                        Fullscreen mode temporarily disabled for local charts.
-                    </div>
+                    <div id={`tv_chart_container_fullscreen_${widgetKey}`} className="w-full h-full" />
                     <button onClick={toggleFullScreen} className="absolute top-4 right-4 z-20 p-2 bg-brand-darkest/50 backdrop-blur-md rounded-lg text-white hover:bg-brand-darkest transition-colors">
                         <CollapseIcon />
                     </button>

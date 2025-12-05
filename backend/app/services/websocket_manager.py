@@ -1,20 +1,33 @@
 from fastapi import WebSocket
-from typing import List
+from typing import List, Dict
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        # সিম্বল অনুযায়ী কানেকশন স্টোর হবে। যেমন: {'BTC/USDT': [ws1, ws2], 'ETH/USDT': [ws3]}
+        self.active_connections: Dict[str, List[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, symbol: str):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        if symbol not in self.active_connections:
+            self.active_connections[symbol] = []
+        self.active_connections[symbol].append(websocket)
 
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+    def disconnect(self, websocket: WebSocket, symbol: str):
+        if symbol in self.active_connections:
+            if websocket in self.active_connections[symbol]:
+                self.active_connections[symbol].remove(websocket)
+            # যদি ওই সিম্বল এ আর কেউ না থাকে, তাহলে কি মুছে ফেলব? (অপশনাল)
+            if not self.active_connections[symbol]:
+                del self.active_connections[symbol]
 
-    async def broadcast(self, message: dict):
-        for connection in self.active_connections:
-            # JSON হিসেবে ডাটা পাঠানো হচ্ছে
-            await connection.send_json(message)
+    async def broadcast_to_symbol(self, symbol: str, message: dict):
+        if symbol in self.active_connections:
+            # কপি করে ইটারেট করা ভালো, যাতে কানেকশন ড্রপ হলে এরর না দেয়
+            for connection in self.active_connections[symbol][:]:
+                try:
+                    await connection.send_json(message)
+                except Exception:
+                    # যদি সেন্ড করতে সমস্যা হয় (যেমন ইউজার ডিসকানেক্টেড), রিমুভ করে দিন
+                    self.disconnect(connection, symbol)
 
 manager = ConnectionManager()
