@@ -23,7 +23,8 @@ import backtrader as bt
 import sys
 import ast
 
-from . import models, database, schemas, crud, utils, auth, email_utils
+from app import models
+from . import database, schemas, crud, utils, auth, email_utils
 from .utils import get_redis_client
 from .services.market_service import MarketService
 from .services.backtest_engine import BacktestEngine
