@@ -1,5 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createChart, ColorType, CrosshairMode, IChartApi, ISeriesApi, CandlestickSeries } from 'lightweight-charts';
+import apiClient from '../../services/client';
 import { useTheme } from '../../contexts/ThemeContext';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
@@ -232,8 +234,12 @@ const ConnectExchangeModal: React.FC<{
 
 const Market: React.FC = () => {
     const { theme } = useTheme();
-    const widgetRef = useRef<any>(null);
+    const chartContainerRef = useRef<HTMLDivElement>(null);
+    const chartInstanceRef = useRef<IChartApi | null>(null);
+    const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+
     const [activePair, setActivePair] = useState('BTC/USDT');
+    const [activeTimeframe, setActiveTimeframe] = useState<Timeframe>('1h');
     const [lastPrice, setLastPrice] = useState(68543.21);
     const [priceUpdateStatus, setPriceUpdateStatus] = useState<'up' | 'down' | 'none'>('none');
     const [price24hAgo, setPrice24hAgo] = useState(68123.45);
@@ -389,6 +395,18 @@ const Market: React.FC = () => {
                     const updatedTrades = [newTrade, ...prevTrades.map(t => ({ ...t, isNew: false }))].slice(0, 50);
                     return updatedTrades;
                 });
+
+                // ৪. চার্ট আপডেট (Lightweight Charts)
+                if (candlestickSeriesRef.current) {
+                    const time = new Date(data.timestamp).getTime() / 1000 as any; // Convert to unix timestamp
+                    candlestickSeriesRef.current.update({
+                        time: time,
+                        open: data.price, // For real-time, we might just update close, but for simplicity using price
+                        high: data.price,
+                        low: data.price,
+                        close: data.price,
+                    });
+                }
             };
 
             socket.onerror = (error) => {
@@ -416,56 +434,101 @@ const Market: React.FC = () => {
         setOrderBookData(generateOrderBookData(lastPrice));
     }, [Math.round(lastPrice / 10)]);
 
-    const getTradingViewSymbol = (pair: string) => `BINANCE:${pair.replace('/', '').toUpperCase()}`;
-
+    // Chart Initialization
     useEffect(() => {
-        const containerId = isChartFullScreen ? `tradingview_fullscreen_chart_${widgetKey}` : `tradingview_market_chart_${widgetKey}`;
+        if (!chartContainerRef.current) return;
 
-        const createWidget = () => {
-            const container = document.getElementById(containerId);
-            if (!container) return;
-
-            if (widgetRef.current) {
-                try { widgetRef.current.remove(); } catch (e) { }
-                widgetRef.current = null;
+        const handleResize = () => {
+            if (chartInstanceRef.current && chartContainerRef.current) {
+                chartInstanceRef.current.applyOptions({ width: chartContainerRef.current.clientWidth });
             }
-
-            const widget = new window.TradingView.widget({
-                symbol: getTradingViewSymbol(activePair),
-                interval: "60",
-                autosize: true,
-                container_id: containerId,
-                theme: theme === 'dark' ? 'Dark' : 'Light',
-                style: '1',
-                locale: 'en',
-                toolbar_bg: theme === 'dark' ? '#1E293B' : '#FFFFFF',
-                enable_publishing: false,
-                hide_side_toolbar: false,
-                allow_symbol_change: true,
-                studies: [
-                    "MASimple@tv-basicstudies",
-                    "RSI@tv-basicstudies"
-                ]
-            });
-            widgetRef.current = widget;
         };
 
-        const checkLibraryAndCreate = () => {
-            if (typeof window.TradingView !== 'undefined' && window.TradingView.widget) {
-                createWidget();
-            } else {
-                setTimeout(checkLibraryAndCreate, 100);
-            }
-        }
+        const chart = createChart(chartContainerRef.current, {
+            layout: {
+                background: { type: ColorType.Solid, color: theme === 'dark' ? '#0F172A' : '#FFFFFF' },
+                textColor: theme === 'dark' ? '#94A3B8' : '#334155',
+            },
+            grid: {
+                vertLines: { color: theme === 'dark' ? '#1E293B' : '#E2E8F0' },
+                horzLines: { color: theme === 'dark' ? '#1E293B' : '#E2E8F0' },
+            },
+            width: chartContainerRef.current.clientWidth,
+            height: chartContainerRef.current.clientHeight,
+            timeScale: {
+                timeVisible: true,
+                secondsVisible: false,
+            },
+        });
 
-        checkLibraryAndCreate();
+        chartInstanceRef.current = chart;
+
+        const candlestickSeries = chart.addSeries(CandlestickSeries, {
+            upColor: '#10B981',
+            downColor: '#F43F5E',
+            borderVisible: false,
+            wickUpColor: '#10B981',
+            wickDownColor: '#F43F5E',
+        });
+
+        candlestickSeriesRef.current = candlestickSeries;
+
+        // Fetch Historical Data
+        const fetchHistory = async () => {
+            try {
+                const response = await apiClient.get('/market-data', {
+                    params: { symbol: activePair, timeframe: activeTimeframe }
+                });
+
+                const formattedData = response.data.map((d: any) => ({
+                    time: new Date(d.time).getTime() / 1000,
+                    open: d.open,
+                    high: d.high,
+                    low: d.low,
+                    close: d.close,
+                }));
+
+                // Sort by time just in case
+                formattedData.sort((a: any, b: any) => a.time - b.time);
+
+                candlestickSeries.setData(formattedData);
+            } catch (error) {
+                console.error("Failed to fetch historical data", error);
+            }
+        };
+
+        fetchHistory();
+
+        window.addEventListener('resize', handleResize);
+
+        // ResizeObserver for container resize (e.g. split pane)
+        const resizeObserver = new ResizeObserver(() => {
+            handleResize();
+        });
+        resizeObserver.observe(chartContainerRef.current);
 
         return () => {
-            if (widgetRef.current) {
-                try { widgetRef.current.remove(); widgetRef.current = null; } catch (e) { }
-            }
+            window.removeEventListener('resize', handleResize);
+            resizeObserver.disconnect();
+            chart.remove();
         };
-    }, [activePair, theme, widgetKey, isChartFullScreen]);
+    }, [theme, activePair, activeTimeframe]);
+
+    // Update chart options when theme changes
+    useEffect(() => {
+        if (chartInstanceRef.current) {
+            chartInstanceRef.current.applyOptions({
+                layout: {
+                    background: { type: ColorType.Solid, color: theme === 'dark' ? '#0F172A' : '#FFFFFF' },
+                    textColor: theme === 'dark' ? '#94A3B8' : '#334155',
+                },
+                grid: {
+                    vertLines: { color: theme === 'dark' ? '#1E293B' : '#E2E8F0' },
+                    horzLines: { color: theme === 'dark' ? '#1E293B' : '#E2E8F0' },
+                },
+            });
+        }
+    }, [theme]);
 
     const change24h = lastPrice - price24hAgo;
     const changePercent24h = (change24h / price24hAgo) * 100;
@@ -562,8 +625,23 @@ const Market: React.FC = () => {
 
                 {/* Chart Area */}
                 <div className="h-full flex flex-col transition-all duration-75" style={{ width: `${leftPaneWidth}%` }}>
-                    <Card className="h-full p-0 overflow-hidden border-0 shadow-xl bg-white dark:bg-brand-dark relative group">
-                        <div id={`tradingview_market_chart_${widgetKey}`} className="h-full w-full" />
+                    <Card className="h-full p-0 overflow-hidden border-0 shadow-xl bg-white dark:bg-brand-dark relative group flex flex-col">
+                        {/* Timeframe Toolbar */}
+                        <div className="flex items-center gap-1 p-2 border-b border-gray-200 dark:border-white/5 overflow-x-auto no-scrollbar">
+                            {['1m', '5m', '15m', '1h', '4h', '1d', '1w'].map((tf) => (
+                                <button
+                                    key={tf}
+                                    onClick={() => setActiveTimeframe(tf as Timeframe)}
+                                    className={`px-3 py-1 text-xs font-bold rounded-md transition-colors ${activeTimeframe === tf
+                                        ? 'bg-brand-primary/10 text-brand-primary'
+                                        : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5 hover:text-slate-900 dark:hover:text-white'
+                                        }`}
+                                >
+                                    {tf}
+                                </button>
+                            ))}
+                        </div>
+                        <div ref={chartContainerRef} className="flex-1 w-full min-h-0" />
                         <button onClick={toggleFullScreen} className="absolute top-3 right-3 z-20 p-2 bg-white/10 dark:bg-black/30 backdrop-blur-sm rounded-lg text-slate-800 dark:text-white opacity-0 group-hover:opacity-100 hover:bg-white/20 dark:hover:bg-black/50 transition-all">
                             {isChartFullScreen ? <CollapseIcon /> : <ExpandIcon />}
                         </button>
@@ -690,7 +768,10 @@ const Market: React.FC = () => {
 
             {isChartFullScreen && (
                 <div className="fixed inset-0 z-[100] bg-white dark:bg-brand-darkest p-0 animate-modal-fade-in">
-                    <div id={`tradingview_fullscreen_chart_${widgetKey}`} className="w-full h-full" />
+                    {/* Fullscreen chart not implemented for lightweight-charts yet, reusing same ref logic would require moving the ref, which is complex. For now, we just show the chart in the main view. */}
+                    <div className="w-full h-full flex items-center justify-center text-gray-500">
+                        Fullscreen mode temporarily disabled for local charts.
+                    </div>
                     <button onClick={toggleFullScreen} className="absolute top-4 right-4 z-20 p-2 bg-brand-darkest/50 backdrop-blur-md rounded-lg text-white hover:bg-brand-darkest transition-colors">
                         <CollapseIcon />
                     </button>

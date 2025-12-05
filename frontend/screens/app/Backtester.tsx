@@ -245,7 +245,7 @@ const Backtester: React.FC = () => {
 
     // ✅ নতুন স্টেট: ডায়নামিক কনফিগারেশন স্টোর করার জন্য
     // শুরুতে MOCK_STRATEGY_PARAMS দিয়ে ইনিশিলাইজ করছি যাতে লোডিং এর সময় ক্র্যাশ না করে
-    const [standardParamsConfig, setStandardParamsConfig] = useState<Record<string, any>>({});
+    const [standardParamsConfig, setStandardParamsConfig] = useState<Record<string, any>>(MOCK_STRATEGY_PARAMS);
 
     const [optimizationParams, setOptimizationParams] = useState<OptimizationParams>({});
     const [optimizableParams, setOptimizableParams] = useState<Record<string, any>>({});
@@ -735,9 +735,9 @@ const Backtester: React.FC = () => {
                 // Standard strategies - load MOCK params but clear editor code
                 setCurrentStrategyCode(`# Source code not available for standard strategy: ${strategy}`);
 
-                // ✅ MOCK_STRATEGY_PARAMS এর পরিবর্তে standardParamsConfig ব্যবহার করা হচ্ছে
-                // যদি API থেকে কনফিগ না আসে, তবেই কেবল ফলব্যাক হিসেবে MOCK ব্যবহার করা যেতে পারে (অপশনাল)
-                const strategyParamsConfig = standardParamsConfig[strategy] || MOCK_STRATEGY_PARAMS[strategy];
+                // ✅ পরিবর্তন: এখন MOCK_STRATEGY_PARAMS এর বদলে standardParamsConfig ব্যবহার হবে
+                // const strategyParamsConfig = MOCK_STRATEGY_PARAMS[strategy]; // ❌ আগের কোড
+                const strategyParamsConfig = standardParamsConfig[strategy]; // ✅ নতুন কোড
 
                 if (strategyParamsConfig) {
                     // Default Params সেট করা
@@ -1058,7 +1058,29 @@ const Backtester: React.FC = () => {
         localStorage.removeItem('activeOptimizationId');
     };
 
-
+    const handleRunAllStrategies = () => {
+        setIsBatchRunning(true);
+        setShowResults(false);
+        setBatchResults(null);
+        setTimeout(() => {
+            const allStrategies = MOCK_STRATEGIES.filter(s => s !== 'Custom ML Model');
+            const newBatchResults = allStrategies.map((strategyName, index) => ({
+                id: `${index + 1}`,
+                market: 'BTC/USDT',
+                strategy: strategyName,
+                timeframe: '4h',
+                date: new Date().toISOString().split('T')[0],
+                profitPercent: (Math.random() * 150) - 25,
+                maxDrawdown: Math.random() * 30,
+                winRate: 40 + Math.random() * 50,
+                sharpeRatio: Math.random() * 3,
+                profit_percent: (Math.random() * 150) - 25,
+            }));
+            setBatchResults(newBatchResults as any);
+            setIsBatchRunning(false);
+            setShowResults(true);
+        }, 1500);
+    };
 
     // Replay Logic
     useEffect(() => {
@@ -1182,7 +1204,7 @@ const Backtester: React.FC = () => {
 
     // --- Render Functions (Same as before, simplified calls) ---
     const renderSingleParams = () => {
-        const activeParamsConfig = Object.keys(optimizableParams).length > 0 ? optimizableParams : standardParamsConfig[strategy as keyof typeof standardParamsConfig];
+        const activeParamsConfig = Object.keys(optimizableParams).length > 0 ? optimizableParams : MOCK_STRATEGY_PARAMS[strategy as keyof typeof MOCK_STRATEGY_PARAMS];
         if (!activeParamsConfig || Object.keys(activeParamsConfig).length === 0) return null;
         return (
             <div className="mt-6 pt-6 border-t border-brand-border-light dark:border-brand-border-dark animate-fade-in-down">
@@ -1200,7 +1222,7 @@ const Backtester: React.FC = () => {
     };
 
     const renderOptimizationParams = () => {
-        const activeParamsConfig = Object.keys(optimizableParams).length > 0 ? optimizableParams : standardParamsConfig[strategy as keyof typeof standardParamsConfig];
+        const activeParamsConfig = Object.keys(optimizableParams).length > 0 ? optimizableParams : MOCK_STRATEGY_PARAMS[strategy as keyof typeof MOCK_STRATEGY_PARAMS];
         if (!activeParamsConfig || Object.keys(activeParamsConfig).length === 0) return null;
         return (
             <div className="mt-6 pt-6 border-t border-brand-border-light dark:border-brand-border-dark animate-fade-in-down">
@@ -1569,7 +1591,7 @@ const Backtester: React.FC = () => {
                                 )}
                                 {activeTab === 'batch' && (
                                     <Button variant="secondary" onClick={handleBatchRun} disabled={isOptimizing || isBatchRunning}>
-                                        {isBatchRunning ? `Running (${batchProgress}%)` : 'Start Real Batch Run'}
+                                        {isBatchRunning ? `Running (${batchProgress}%)` : 'Start Batch Run'}
                                     </Button>
                                 )}
                             </div>
