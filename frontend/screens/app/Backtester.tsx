@@ -23,7 +23,7 @@ import "react-datepicker/dist/react-datepicker.css";
 import MonthlyReturnsHeatmap from '../../components/ui/MonthlyReturnsHeatmap';
 import ParameterHeatmap from '../../components/ui/ParameterHeatmap';
 
-import { Activity, Layers, PlayIcon, CodeIcon, SaveIcon, UploadCloud, Download, X, AlertCircle, Settings, Info, LayoutGrid, List, FileText, BarChart2 } from 'lucide-react';
+import { Activity, Layers, PlayIcon, CodeIcon, SaveIcon, UploadCloud, Download, X, AlertCircle, Settings, Info, LayoutGrid, List, FileText, BarChart2, RefreshCw, CheckCircle2 } from 'lucide-react';
 
 // --- Constants ---
 const TIMEFRAME_OPTIONS: Timeframe[] = [
@@ -303,7 +303,7 @@ const Backtester: React.FC = () => {
     const [progress, setProgress] = useState(0);
     const [syncStatusMessage, setSyncStatusMessage] = useState("");
     const [syncProgress, setSyncProgress] = useState(0); // ✅ নতুন স্টেট
-    const [syncStatusText, setSyncStatusText] = useState("Initializing..."); // ✅ নতুন স্টেট
+    const [syncStatusText, setSyncStatusText] = useState("Initializing connection...");
 
     // WebSocket Connection for Sync Progress
     useEffect(() => {
@@ -841,22 +841,28 @@ const Backtester: React.FC = () => {
         }
     }, [pollOptimizationStatus]);
 
-    // ✅ WebSocket Listener Fix
+    // ✅ WebSocket Connection for Sync Progress (আপডেটেড ও শক্তিশালী লজিক)
     useEffect(() => {
         let ws: WebSocket | null = null;
         let reconnectTimeout: NodeJS.Timeout;
 
         const connectWebSocket = () => {
+            // যদি সিঙ্ক না চলে, তাহলে কানেক্ট করার দরকার নেই (রিসোর্স সেভিং)
+            if (!isSyncing) return;
+
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const host = window.location.hostname;
+            // পোর্ট যদি ডেভেলপমেন্টে ভিন্ন হয় তবে চেক করুন, নাহলে window.location.port
             const port = '8000';
             const safeSymbol = symbol ? symbol.replace('/', '') : 'BTCUSDT';
             const wsUrl = `${protocol}//${host}:${port}/ws/market-data/${safeSymbol}`;
 
+            console.log("Connecting to Sync WS:", wsUrl);
             ws = new WebSocket(wsUrl);
 
             ws.onopen = () => {
-                console.log("Connected to Sync WS");
+                console.log("✅ Connected to Sync WS");
+                setSyncStatusText("Connected. Fetching data...");
             };
 
             ws.onmessage = (event) => {
@@ -866,67 +872,66 @@ const Backtester: React.FC = () => {
                     // 🎯 শুধু 'sync_progress' টাইপের মেসেজ আমরা প্রসেস করব
                     if (data.type === "sync_progress") {
                         setSyncProgress(data.percent || 0);
-                        setSyncStatusText(data.status || "Processing...");
+                        setSyncStatusText(data.status || "Syncing data...");
 
                         // ১০০% হয়ে গেলে লোডিং বন্ধ করা
-                        if (data.percent === 100) {
-                            setTimeout(() => setIsSyncing(false), 1000);
+                        if (data.percent >= 100) {
+                            setTimeout(() => {
+                                setIsSyncing(false);
+                                showToast('Data Sync Completed Successfully!', 'success');
+                            }, 1500); // ব্যবহারকারীকে ১০০% দেখার সুযোগ দিন
                         }
                     }
                 } catch (err) {
-                    // জেসন পার্সিং এরর বা অন্য কোনো সাধারণ এরর ইগনোর করা হচ্ছে
-                    // console.warn("WS Message Parse Error", err);
+                    console.warn("WS Message Parse Error", err);
                 }
             };
 
             ws.onerror = (event) => {
                 console.error("WS Error (Market Data):", event);
-                // Log all properties of the event object
-                for (const key in event) {
-                    console.log(`Event property: ${key} =`, (event as any)[key]);
-                }
-                if (reconnectTimeout) clearTimeout(reconnectTimeout);
-                reconnectTimeout = setTimeout(connectWebSocket, 3000);
+                setSyncStatusText("Connection issue, retrying...");
             };
 
             ws.onclose = (event) => {
                 console.log(`Market Data WS closed: ${event.code}`);
-                if (event.code !== 1000) {
-                    if (reconnectTimeout) clearTimeout(reconnectTimeout);
+                // যদি সিঙ্কিং চলাকালীন বন্ধ হয়, রিকানেক্ট করুন
+                if (isSyncing && event.code !== 1000) {
                     reconnectTimeout = setTimeout(connectWebSocket, 3000);
                 }
             };
         };
 
-        connectWebSocket();
+        if (isSyncing) {
+            connectWebSocket();
+        }
 
         return () => {
             if (ws) ws.close();
             if (reconnectTimeout) clearTimeout(reconnectTimeout);
         };
-    }, [symbol]); // সিম্বল পাল্টালে রিকানেক্ট হবে
+    }, [isSyncing, symbol]); // isSyncing ডিপেন্ডেন্সি যোগ করা হয়েছে
 
+    // ✅ Handle Sync Data (লজিক ফিক্স)
     const handleSyncData = async () => {
         setIsSyncing(true);
-        setSyncProgress(0); // ✅ রিসেট
-        setSyncStatusText("Starting Sync...");
+        setSyncProgress(0);
+        setSyncStatusText("Initiating Sync Request...");
 
         try {
-            // API কল করা (এটি ব্যাকগ্রাউন্ডে চলতে থাকবে)
+            // API কল করা (এটি ব্যাকগ্রাউন্ডে টাস্ক ট্রিগার করবে)
             const response = await syncMarketData(symbol, timeframe, startDate, endDate);
 
-            // যদি API রেসপন্স এরর দেয়
             if (response.status === 'error') {
                 showToast(`Sync Failed: ${response.message}`, 'error');
                 setIsSyncing(false);
             } else {
-                showToast(`Synced historical data for ${symbol}`, 'success');
-                // সাকসেস হলে WebSocket 100% মেসেজ পাঠাবে, তাই এখানে কিছু না করলেও হবে
+                // API সফল হলে আমরা WebSocket এর মাধ্যমে আপডেটের অপেক্ষা করব
+                showToast(`Sync started for ${symbol}...`, 'info');
             }
         } catch (error) {
             console.error(error);
-            showToast('Failed to sync market data.', 'error');
-            setIsSyncing(false); // এরর হলে বন্ধ করুন
+            showToast('Failed to initiate sync.', 'error');
+            setIsSyncing(false);
         }
     };
 
@@ -1386,29 +1391,61 @@ const Backtester: React.FC = () => {
 
                                 {/* Mode Switcher Removed - Tabs handle this now */}
 
-                                <Button variant="secondary" onClick={handleSyncData} disabled={isSyncing}>
-                                    {isSyncing ? "Syncing..." : "☁ Sync Data"}
+                                <Button
+                                    variant="secondary"
+                                    onClick={handleSyncData}
+                                    disabled={isSyncing}
+                                    className={`transition-all duration-300 ${isSyncing ? 'bg-blue-50 text-blue-600 border-blue-200' : ''}`}
+                                >
+                                    {isSyncing ? (
+                                        <span className="flex items-center gap-2">
+                                            <RefreshCw className="animate-spin" size={16} /> Syncing...
+                                        </span>
+                                    ) : (
+                                        <span className="flex items-center gap-2">
+                                            <UploadCloud size={16} /> Sync Data
+                                        </span>
+                                    )}
                                 </Button>
                             </div>
 
-                            {/* Sync Progress Bar */}
+                            {/* ✅ NEW ADVANCED SYNC PROGRESS BAR UI */}
                             {isSyncing && (
-                                <Card className="mt-4 border border-blue-500/20 bg-blue-500/5 animate-fade-in">
-                                    <div className="space-y-2">
-                                        <div className="flex justify-between text-xs font-medium text-blue-600 dark:text-blue-400">
-                                            <span className="animate-pulse">{syncStatusText}</span>
-                                            <span>{syncProgress}%</span>
-                                        </div>
-                                        <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 overflow-hidden">
-                                            <div
-                                                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-out relative"
-                                                style={{ width: `${syncProgress}%` }}
-                                            >
-                                                <div className="absolute inset-0 bg-white/30 animate-[shimmer_2s_infinite]"></div>
+                                <div className="mb-8 p-6 rounded-xl border border-blue-100 dark:border-blue-900/30 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 dark:from-blue-900/10 dark:to-indigo-900/10 backdrop-blur-sm shadow-sm animate-fade-in">
+                                    <div className="flex justify-between items-end mb-3">
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-2 bg-blue-100 dark:bg-blue-800 rounded-lg">
+                                                <RefreshCw className="text-blue-600 dark:text-blue-300 animate-spin" size={20} />
+                                            </div>
+                                            <div>
+                                                <h4 className="font-bold text-slate-800 dark:text-gray-100 text-sm">Synchronizing Market Data</h4>
+                                                <p className="text-xs text-blue-500 font-mono mt-0.5 animate-pulse">{syncStatusText}</p>
                                             </div>
                                         </div>
+                                        <div className="text-right">
+                                            <span className="text-2xl font-bold text-blue-600 dark:text-blue-400">{syncProgress}%</span>
+                                        </div>
                                     </div>
-                                </Card>
+
+                                    {/* Advanced Progress Bar Track */}
+                                    <div className="w-full h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden relative shadow-inner">
+                                        {/* Gradient Fill */}
+                                        <div
+                                            className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 rounded-full transition-all duration-500 ease-out relative"
+                                            style={{ width: `${syncProgress}%` }}
+                                        >
+                                            {/* Shimmer Effect Overlay */}
+                                            <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full animate-[shimmer_1.5s_infinite]"></div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-between mt-2 text-[10px] text-gray-400 font-medium uppercase tracking-wider">
+                                        <span>Start</span>
+                                        <span>Fetching Candles</span>
+                                        <span>Processing</span>
+                                        <span>Complete</span>
+                                    </div>
+                                </div>
                             )}
 
                             {/* ✅ ডাটা সোর্স টগল */}

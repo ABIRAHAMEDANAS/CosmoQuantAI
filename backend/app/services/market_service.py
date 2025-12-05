@@ -29,6 +29,9 @@ class MarketService:
             'enableRateLimit': True,
         })
         
+        # ✅ সেফ সিম্বল জেনারেট করা (স্ল্যাশ ছাড়া) - ফ্রন্টএন্ডের সাথে মিল রাখার জন্য
+        safe_symbol = symbol.replace('/', '') 
+
         try:
             # 2. Check if timeframe is supported
             await exchange.load_markets()
@@ -54,8 +57,15 @@ class MarketService:
             # 3. Latest Data (No Loop if start_date is not provided)
             if not since_ts:
                  try:
+                    # শুরুতেই একটা ০% মেসেজ পাঠানো
+                    await self._broadcast_progress(symbol, safe_symbol, 0, "Fetching latest data...")
+
                     ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
                     count = self._save_candles(db, ohlcv, symbol, timeframe)
+                    
+                    # শেষ হলে ১০০% মেসেজ পাঠানো
+                    await self._broadcast_progress(symbol, safe_symbol, 100, "Latest data synced!")
+                    
                     return {"status": "success", "message": "Latest data synced", "count": count}
                  except Exception as e:
                      return {"status": "error", "message": f"Fetch Error: {str(e)}"}
@@ -68,6 +78,9 @@ class MarketService:
             # মোট কত সময় বাকি তা হিসাব করা (প্রোগ্রেস এর জন্য)
             total_duration = end_ts - since_ts
             
+            # শুরুতেই একটা ০% মেসেজ পাঠানো যাতে UI রেডি হয়
+            await self._broadcast_progress(symbol, safe_symbol, 0, f"Starting sync for {symbol}...")
+
             with tqdm(total=total_duration, desc=f"Syncing {symbol}", unit="ms") as pbar:
                 while current_since < end_ts:
                     try:
@@ -95,12 +108,8 @@ class MarketService:
                     # TQDM আপডেট
                     pbar.update(last_time - current_since)
 
-                    # WebSocket মেসেজ পাঠানো
-                    await manager.broadcast_to_symbol("general", {
-                        "type": "sync_progress",
-                        "percent": progress_percent,
-                        "status": f"Syncing {symbol}... {progress_percent}%"
-                    })
+                    # ✅ WebSocket মেসেজ পাঠানো (সব চ্যানেলে)
+                    await self._broadcast_progress(symbol, safe_symbol, progress_percent, f"Syncing {symbol}... {progress_percent}%")
 
                     # পরবর্তী লুপের জন্য সময় সেট করা
                     if last_time == current_since:
@@ -112,11 +121,7 @@ class MarketService:
                     await asyncio.sleep(0.1)
 
             # ফাইনাল ১০০% মেসেজ পাঠানো
-            await manager.broadcast_to_symbol("general", {
-                "type": "sync_progress",
-                "percent": 100,
-                "status": "Sync Completed!"
-            })
+            await self._broadcast_progress(symbol, safe_symbol, 100, "Sync Completed Successfully!")
 
             return {
                 "status": "success", 
@@ -126,9 +131,27 @@ class MarketService:
 
         except Exception as e:
             print(f"Sync Error: {e}")
+            # এরর মেসেজ পাঠানো
+            await self._broadcast_progress(symbol, safe_symbol, 0, f"Sync Failed: {str(e)}")
             return {"status": "error", "message": str(e)}
         finally:
             await exchange.close()
+
+    # ✅ হেল্পার মেথড: সব পসিবল চ্যানেলে ব্রডকাস্ট করার জন্য
+    async def _broadcast_progress(self, symbol: str, safe_symbol: str, percent: int, status_msg: str):
+        message = {
+            "type": "sync_progress",
+            "percent": percent,
+            "status": status_msg
+        }
+        # ১. জেনারেল চ্যানেলে (যদি কেউ থাকে)
+        await manager.broadcast_to_symbol("general", message)
+        # ২. অরিজিনাল সিম্বল (যেমন: 'BTC/USDT')
+        await manager.broadcast_to_symbol(symbol, message)
+        # ৩. সেফ সিম্বল (যেমন: 'BTCUSDT') - এটিই ফ্রন্টএন্ড সাধারণত ব্যবহার করে
+        if safe_symbol != symbol:
+            await manager.broadcast_to_symbol(safe_symbol, message)
+
 
     # ✅ আপডেটেড _save_candles মেথড (বাল্ক ইনসার্ট)
     def _save_candles(self, db: Session, ohlcv: list, symbol: str, timeframe: str):
