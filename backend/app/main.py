@@ -421,10 +421,22 @@ async def upload_strategy(file: UploadFile = File(...), current_user: models.Use
     try:
         with open(file_location, "wb+") as file_object:
             shutil.copyfileobj(file.file, file_object)
+            
+        # ✅ ৩. সিকিউরিটি ভ্যালিডেশন (নতুন)
+        try:
+            utils.validate_strategy_code(file_location)
+        except ValueError as e:
+            # ভ্যালিডেশন ফেইল করলে ফাইল ডিলিট করে দিব
+            os.remove(file_location)
+            raise HTTPException(status_code=400, detail=str(e))
+            
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Could not save file: {str(e)}")
+        # অন্য কোনো এরর হলে (যদি ফাইল থেকে থাকে তবে ডিলিট করব)
+        if os.path.exists(file_location):
+            os.remove(file_location)
+        raise HTTPException(status_code=500, detail=f"Could not save or validate file: {str(e)}")
     
-    # ৩. সফল মেসেজ রিটার্ন করা
+    # ৪. সফল মেসেজ রিটার্ন করা
     return {
         "filename": file.filename, 
         "message": "Strategy uploaded successfully. It will be available for backtesting."
