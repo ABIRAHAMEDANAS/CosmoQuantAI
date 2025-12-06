@@ -56,3 +56,4 @@ ccxt
 alembic
 deap
 tqdm
+alpaca-py
