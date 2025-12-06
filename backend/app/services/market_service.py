@@ -27,6 +27,7 @@ class MarketService:
         # 1. Exchange Setup
         exchange = ccxt.binance({
             'enableRateLimit': True,
+            'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         })
         
         # ✅ সেফ সিম্বল জেনারেট করা (স্ল্যাশ ছাড়া) - ফ্রন্টএন্ডের সাথে মিল রাখার জন্য
@@ -201,7 +202,11 @@ class MarketService:
         try:
             if hasattr(ccxt, exchange_id):
                 exchange_class = getattr(ccxt, exchange_id)
-                temp_exchange = exchange_class()
+                # ✅ FIX: Add Custom User-Agent to bypass Cloudflare
+                temp_exchange = exchange_class({
+                    'enableRateLimit': True,
+                    'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                })
                 try:
                     markets = await temp_exchange.load_markets()
                     symbols = list(markets.keys())

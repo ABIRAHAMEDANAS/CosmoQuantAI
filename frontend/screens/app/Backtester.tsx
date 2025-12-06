@@ -309,8 +309,11 @@ const Backtester: React.FC = () => {
     useEffect(() => {
         let ws: WebSocket | null = null;
         let reconnectTimeout: NodeJS.Timeout;
+        let isMounted = true; // ✅ Component mount status track kora
 
         const connectWebSocket = () => {
+            if (!isMounted) return; // ✅ Prevent connection if unmounted
+
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const host = window.location.hostname;
             const port = '8000'; // Backend port
@@ -352,7 +355,7 @@ const Backtester: React.FC = () => {
 
             ws.onclose = (event) => {
                 console.log(`WS Connection closed: ${event.code}`);
-                if (event.code !== 1000) {
+                if (event.code !== 1000 && isMounted) { // ✅ Check isMounted before reconnecting
                     if (reconnectTimeout) clearTimeout(reconnectTimeout);
                     reconnectTimeout = setTimeout(connectWebSocket, 3000);
                 }
@@ -362,6 +365,7 @@ const Backtester: React.FC = () => {
         connectWebSocket();
 
         return () => {
+            isMounted = false; // ✅ Set flag to false on unmount
             if (ws) ws.close();
             if (reconnectTimeout) clearTimeout(reconnectTimeout);
         };

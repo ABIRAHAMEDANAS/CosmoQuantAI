@@ -79,36 +79,48 @@ class EndpointFilter(logging.Filter):
         return record.getMessage().find("/api/backtest/status") == -1
 
 # --- 🔥 গ্লোবাল এক্সচেঞ্জ ক্লায়েন্ট (Singleton) ---
-exchange_client = None
+# exchange_client = None (Removed global variable)
 
 # গ্লোবাল ব্যাকগ্রাউন্ড টাস্ক ফ্ল্যাগ
 bg_task_running = False
 
 # ১. ব্যাকগ্রাউন্ড টাস্ক যা Binance থেকে ডাটা আনবে এবং ম্যানেজারকে দিবে
+# ১. ব্যাকগ্রাউন্ড টাস্ক যা Binance থেকে ডাটা আনবে এবং ম্যানেজারকে দিবে
 async def fetch_market_data_background():
-    global exchange_client
+    # ✅ Client ekhane local variable hisebe thakbe ba function er vitore init hobe
+    local_exchange_client = None
     print("🚀 Background Market Data Task Started")
     
+    try:
+        # Task shuru howar somoy ekbar init koro
+        local_exchange_client = ccxt.binance({
+            'enableRateLimit': True,
+            'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
+        await local_exchange_client.load_markets()
+    except Exception as e:
+        print(f"Error initializing background exchange client: {e}")
+
     while True:
         try:
-            # বর্তমানে কোন কোন সিম্বল ইউজাররা দেখছে?
             active_symbols = list(manager.active_connections.keys())
             
             if not active_symbols:
                 await asyncio.sleep(1)
                 continue
 
-            # Binance থেকে ওই সিম্বলগুলোর ডাটা আনা (Batch বা Loop)
-            # ভালো পারফরম্যান্সের জন্য ccxt.pro ব্যবহার করা উচিত, তবে এখানে REST দিয়ে দেখাচ্ছি
             for symbol in active_symbols:
-                # "general" চ্যানেল বাদে বাকিগুলো চেক করা
                 if symbol == "general":
                     continue
-                    
-                if not exchange_client:
-                     exchange_client = ccxt.binance({'enableRateLimit': True})
+                
+                # Jodi client na thake, abar try koro
+                if not local_exchange_client:
+                     local_exchange_client = ccxt.binance({
+                         'enableRateLimit': True,
+                         'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                     })
                      
-                ticker = await exchange_client.fetch_ticker(symbol)
+                ticker = await local_exchange_client.fetch_ticker(symbol)
                 
                 data = {
                     "symbol": symbol,
@@ -119,14 +131,16 @@ async def fetch_market_data_background():
                     "volume": ticker.get('quoteVolume')
                 }
                 
-                # 🔥 শুধুমাত্র ওই সিম্বল সাবস্ক্রাইব করা ইউজারদের ডাটা পাঠানো
                 await manager.broadcast_to_symbol(symbol, data)
 
-            # রেট লিমিট এড়াতে একটু বিরতি (১০০০ মি.সে. / সিম্বল সংখ্যা)
             await asyncio.sleep(1)
 
         except Exception as e:
             print(f"Background Task Error: {e}")
+            # Error hole client close kore abar null kore dao, porer loop e abar create hobe
+            if local_exchange_client:
+                await local_exchange_client.close()
+                local_exchange_client = None
             await asyncio.sleep(5)
 
 @app.on_event("startup")
@@ -138,29 +152,14 @@ async def startup_event():
     db = database.SessionLocal()
     db.close()
 
-    # ৩. 🔥 এক্সচেঞ্জ একবার কানেক্ট এবং লোড করা
-    global exchange_client
-    try:
-        exchange_client = ccxt.binance({
-            'enableRateLimit': True,
-            'timeout': 30000,  # টাইমআউট বাড়িয়ে ৩০ সেকেন্ড করা হলো
-        })
-        # ব্যাকগ্রাউন্ডে মার্কেট লোড করা (যাতে প্রথম রিকোয়েস্টে দেরি না হয়)
-        await exchange_client.load_markets()
-        print("✅ Binance Exchange Connected & Markets Loaded Globally!")
-        
-        # ব্যাকগ্রাউন্ড টাস্ক রান করা
-        asyncio.create_task(fetch_market_data_background())
-    except Exception as e:
-        print(f"⚠️ Warning: Could not connect to Binance on startup: {e}")
+    # ৩. ব্যাকগ্রাউন্ড টাস্ক রান করা
+    asyncio.create_task(fetch_market_data_background())
 
 @app.on_event("shutdown")
 async def shutdown_event():
     # সার্ভার বন্ধ হলে কানেকশন ক্লোজ করা
-    global exchange_client
-    if exchange_client:
-        await exchange_client.close()
-        print("🛑 Binance Connection Closed.")
+    # NOTE: Background task cleanup happens naturally or can be explicitly cancelled if tracked
+    print("🛑 Server Shutdown Initiated.")
 
 # ডাটাবেস সেশন ডিপেন্ডেন্সি
 def get_db():

@@ -307,7 +307,10 @@ def download_candles_task(self, exchange_id, symbol, timeframe, start_date, end_
             return {"status": "failed", "error": f"Exchange {exchange_id} not found"}
             
         exchange_class = getattr(ccxt, exchange_id)
-        exchange = exchange_class({'enableRateLimit': True})
+        exchange = exchange_class({
+            'enableRateLimit': True,
+            'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
         redis_client = get_redis_client()
         
         safe_symbol = symbol.replace('/', '-')
@@ -403,7 +406,10 @@ def download_trades_task(self, exchange_id, symbol, start_date, end_date=None):
              return {"status": "failed", "error": f"Exchange {exchange_id} not found"}
         
         exchange_class = getattr(ccxt, exchange_id)
-        exchange = exchange_class({'enableRateLimit': True})
+        exchange = exchange_class({
+            'enableRateLimit': True,
+            'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
         redis_client = get_redis_client() 
         
         safe_symbol = symbol.replace('/', '-')

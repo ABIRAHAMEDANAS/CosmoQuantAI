@@ -65,11 +65,14 @@ class BacktestEngine:
                     df = pd.read_csv(file_path)
                     df.columns = [c.lower().strip() for c in df.columns]
                     
+                    # ✅ IMPROVED DATE PARSING
                     if 'datetime' in df.columns:
-                        df['datetime'] = pd.to_datetime(df['datetime'])
+                        df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce') # Errors handle kora
+                        df.dropna(subset=['datetime'], inplace=True) # Invalid date row baad dewa
                         df.set_index('datetime', inplace=True)
                     elif 'date' in df.columns:
-                        df['datetime'] = pd.to_datetime(df['date'])
+                        df['datetime'] = pd.to_datetime(df['date'], errors='coerce')
+                        df.dropna(subset=['datetime'], inplace=True)
                         df.set_index('datetime', inplace=True)
                         
                     required_cols = ['open', 'high', 'low', 'close', 'volume']
@@ -414,17 +417,25 @@ class BacktestEngine:
             returns, positions, transactions, gross_lev = portfolio_stats.get_pf_items()
             returns.index = returns.index.tz_localize(None)
 
+            # ✅ SAFE CALCULATION LOGIC ADDED HERE
+            sharpe_val = 0
+            if not returns.empty and len(returns) > 5:
+                try:
+                    sharpe_val = qs.stats.sharpe(returns)
+                except:
+                    sharpe_val = 0
+
             qs_metrics = {
-                "sharpe": qs.stats.sharpe(returns),
-                "sortino": qs.stats.sortino(returns),
-                "max_drawdown": qs.stats.max_drawdown(returns) * 100,
-                "win_rate": qs.stats.win_rate(returns) * 100,
-                "profit_factor": qs.stats.profit_factor(returns),
-                "cagr": qs.stats.cagr(returns) * 100,
-                "volatility": qs.stats.volatility(returns) * 100,
-                "calmar": qs.stats.calmar(returns),
-                "recovery_factor": qs.stats.recovery_factor(returns),
-                "expected_return": qs.stats.expected_return(returns) * 100
+                "sharpe": sharpe_val,
+                "sortino": qs.stats.sortino(returns) if not returns.empty else 0,
+                "max_drawdown": qs.stats.max_drawdown(returns) * 100 if not returns.empty else 0,
+                "win_rate": qs.stats.win_rate(returns) * 100 if not returns.empty else 0,
+                "profit_factor": qs.stats.profit_factor(returns) if not returns.empty else 0,
+                "cagr": qs.stats.cagr(returns) * 100 if not returns.empty else 0,
+                "volatility": qs.stats.volatility(returns) * 100 if not returns.empty else 0,
+                "calmar": qs.stats.calmar(returns) if not returns.empty else 0,
+                "recovery_factor": qs.stats.recovery_factor(returns) if not returns.empty else 0,
+                "expected_return": qs.stats.expected_return(returns) * 100 if not returns.empty else 0
             }
 
             if not returns.empty:
