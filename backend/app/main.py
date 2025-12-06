@@ -720,18 +720,34 @@ def start_trade_download(request: schemas.DownloadRequest):
 @app.get("/api/download/status/{task_id}")
 def get_download_status(task_id: str):
     task_result = AsyncResult(task_id)
+    
     if task_result.state == 'PENDING':
         return {"status": "Pending", "percent": 0}
+    
     elif task_result.state == 'PROGRESS':
+        info = task_result.info
         return {
             "status": "Processing", 
-            "percent": task_result.info.get('percent', 0),
-            "message": task_result.info.get('status', '')
+            "percent": info.get('percent', 0) if isinstance(info, dict) else 0,
+            "message": info.get('status', '') if isinstance(info, dict) else ''
         }
+        
     elif task_result.state == 'SUCCESS':
-        return {"status": "Completed", "percent": 100, "result": task_result.result}
+        # ✅ ফিক্স: টাস্ক যদি ম্যানুয়ালি স্টপ করা হয়, তখন রেজাল্টের ভেতরে 'Revoked' থাকে
+        result = task_result.result
+        if isinstance(result, dict) and result.get("status") == "Revoked":
+            return {"status": "Revoked", "message": result.get("message", "Stopped by user")}
+            
+        return {"status": "Completed", "percent": 100, "result": result}
+        
     elif task_result.state == 'FAILURE':
         return {"status": "Failed", "error": str(task_result.result)}
+        
+    # ✅ ফিক্স: Celery নিজে যদি টাস্কটি REVOKED স্টেটে ফেলে দেয়
+    elif task_result.state == 'REVOKED':
+        return {"status": "Revoked", "message": "Task revoked"}
+    
+    # অন্য যেকোনো স্ট্যাটাস
     return {"status": task_result.state}
 
 # --- Data Conversion Endpoint ---

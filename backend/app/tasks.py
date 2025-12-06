@@ -309,7 +309,8 @@ def download_candles_task(self, exchange_id, symbol, timeframe, start_date, end_
         exchange_class = getattr(ccxt, exchange_id)
         exchange = exchange_class({
             'enableRateLimit': True,
-            'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'timeout': 10000,
         })
         redis_client = get_redis_client()
         
@@ -417,7 +418,8 @@ def download_trades_task(self, exchange_id, symbol, start_date, end_date=None):
         exchange_class = getattr(ccxt, exchange_id)
         exchange = exchange_class({
             'enableRateLimit': True,
-            'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'timeout': 10000,
         })
         redis_client = get_redis_client() 
         

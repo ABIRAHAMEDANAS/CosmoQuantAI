@@ -204,38 +204,44 @@ class MarketService:
             if hasattr(ccxt, exchange_id):
                 exchange_class = getattr(ccxt, exchange_id)
                 
-                # ✅ ডায়নামিক কনফিগারেশন তৈরি
+                # কনফিগারেশন
                 config = {
                     'enableRateLimit': True,
                     'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
                 }
 
-                # ✅ এনভায়রনমেন্ট ভেরিয়েবল থেকে API Key খোঁজা (যেকোনো এক্সচেঞ্জের জন্য)
-                # উদাহরণ: ALPACA_API_KEY, BINANCE_API_KEY
+                # ঐচ্ছিক: .env থেকে API Key চেক করা (যদি থাকে)
                 env_api_key = os.getenv(f"{exchange_id.upper()}_API_KEY")
                 env_secret = os.getenv(f"{exchange_id.upper()}_SECRET")
-
                 if env_api_key and env_secret:
                     config['apiKey'] = env_api_key
                     config['secret'] = env_secret
-                
-                # এক্সচেঞ্জ ইনিশিয়ালাইজ করা
-                temp_exchange = exchange_class(config)
-                
+
+                # এক্সচেঞ্জ ইনিশিয়ালাইজ করার চেষ্টা
+                try:
+                    temp_exchange = exchange_class(config)
+                except Exception as e:
+                    # Alpaca বা অন্য এক্সচেঞ্জ ক্রেডেনশিয়াল ছাড়া ইনিশিলাইজ না হলে এখানে থামবে
+                    print(f"Skipping {exchange_id}: Init failed (Needs keys?). Error: {e}")
+                    return []
+
+                # মার্কেট লোড করার চেষ্টা
                 try:
                     markets = await temp_exchange.load_markets()
                     symbols = list(markets.keys())
+                    
+                    # সফল হলে ক্যাশে সেভ করুন
                     self._markets_cache[exchange_id] = symbols
                     return symbols
                 except Exception as e:
-                    # যদি ক্রেডেনশিয়াল না থাকে বা ভুল হয়, তখন লগ প্রিন্ট হবে কিন্তু ক্র্যাশ করবে না
-                    print(f"Warning: Could not load markets for {exchange_id}. Reason: {e}")
+                    print(f"Could not load markets for {exchange_id}: {e}")
                     return []
                 finally:
-                    await temp_exchange.close()
+                    if temp_exchange:
+                        await temp_exchange.close()
             return []
         except Exception as e:
-            print(f"Error initializing {exchange_id}: {e}")
+            print(f"Critical Error fetching {exchange_id}: {e}")
             return []
 
     def get_supported_exchanges(self):

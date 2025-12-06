@@ -470,12 +470,12 @@ const Backtester: React.FC = () => {
                 return;
             }
 
-            // End Date ফাঁকা থাকলে undefined পাঠাব, যাতে ব্যাকএন্ড "Till Now" ধরে নেয়
+            // API কল
             const payload = {
                 exchange: dlExchange,
                 symbol: dlSymbol,
                 start_date: `${dlStartDate} 00:00:00`,
-                end_date: dlEndDate ? `${dlEndDate} 23:59:59` : undefined // ✅ Till Now লজিক
+                end_date: dlEndDate ? `${dlEndDate} 23:59:59` : undefined
             };
 
             let res;
@@ -486,35 +486,46 @@ const Backtester: React.FC = () => {
             }
 
             const taskId = res.task_id;
-            setActiveTaskId(taskId); // টাস্ক আইডি সেভ
+            setActiveTaskId(taskId);
 
-            // পোলিং শুরু
+            // ✅ পোলিং লুপ ফিক্স
             const interval = setInterval(async () => {
                 try {
                     const status = await getDownloadStatus(taskId);
+                    console.log("Download Status:", status); // ডিবাগিং এর জন্য
 
                     if (status.status === 'Processing') {
                         setDownloadProgress(status.percent);
-                    } else if (status.status === 'Completed') {
+                    }
+                    else if (status.status === 'Completed') {
                         clearInterval(interval);
                         setIsDownloading(false);
                         setDownloadProgress(100);
                         setActiveTaskId(null);
                         showToast('Download Completed Successfully! 🎉', 'success');
-                    } else if (status.status === 'Failed' || status.status === 'Revoked') {
+                    }
+                    // ✅ ফিক্স: স্টপ বাটন বা ফেইল হলে লুপ থামানো
+                    else if (
+                        status.status === 'Failed' ||
+                        status.status === 'Revoked' ||
+                        status.status === 'REVOKED' // সার্ভার থেকে বড় হাতের আসলেও ধরবে
+                    ) {
                         clearInterval(interval);
-                        setIsDownloading(false);
+                        setIsDownloading(false); // এটি মডাল ক্লোজ বাটনকে সচল করবে
                         setActiveTaskId(null);
 
-                        if (status.status === 'Revoked') {
+                        if (status.status === 'Revoked' || status.status === 'REVOKED') {
                             showToast('Download Stopped by User.', 'info');
                         } else {
                             showToast(`Download Failed: ${status.error}`, 'error');
                         }
                     }
                 } catch (e) {
+                    // নেটওয়ার্ক এরর হলে লুপ থামিয়ে দেওয়া ভালো
+                    console.error("Polling Error", e);
                     clearInterval(interval);
                     setIsDownloading(false);
+                    setActiveTaskId(null);
                 }
             }, 1000);
 
@@ -2182,36 +2193,26 @@ const Backtester: React.FC = () => {
                                 {/* Inputs Grid */}
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="text-xs text-gray-500 mb-1 block">Exchange</label>
-                                        <select
+                                        <SearchableSelect
+                                            label="Select Exchange"
+                                            options={exchanges}
                                             value={dlExchange}
-                                            onChange={(e) => setDlExchange(e.target.value)}
+                                            onChange={setDlExchange}
                                             disabled={isDownloading}
-                                            className="w-full p-2 border rounded bg-white dark:bg-brand-dark/50 border-gray-300 dark:border-gray-700 text-sm"
-                                        >
-                                            {exchanges.map(ex => (
-                                                <option key={ex} value={ex}>{ex.toUpperCase()}</option>
-                                            ))}
-                                        </select>
+                                        />
                                     </div>
                                     <div>
-                                        <label className="text-xs text-gray-500 mb-1 block">
-                                            Symbol {isLoadingDlMarkets && <span className="animate-pulse text-brand-primary ml-1">(Loading...)</span>}
+                                        <label className="text-xs text-gray-500 mb-1 block flex justify-between">
+                                            Symbol
+                                            {isLoadingDlMarkets && <span className="text-brand-primary animate-pulse">Loading...</span>}
                                         </label>
-                                        <select
+                                        <SearchableSelect
+                                            label="Select Pair"
+                                            options={dlMarkets}
                                             value={dlSymbol}
-                                            onChange={(e) => setDlSymbol(e.target.value)}
+                                            onChange={setDlSymbol}
                                             disabled={isDownloading || isLoadingDlMarkets}
-                                            className="w-full p-2 border rounded bg-white dark:bg-brand-dark/50 border-gray-300 dark:border-gray-700 text-sm"
-                                        >
-                                            {dlMarkets.length > 0 ? (
-                                                dlMarkets.map(pair => (
-                                                    <option key={pair} value={pair}>{pair}</option>
-                                                ))
-                                            ) : (
-                                                <option disabled>No pairs found</option>
-                                            )}
-                                        </select>
+                                        />
                                     </div>
                                 </div>
 
