@@ -359,14 +359,22 @@ def download_candles_task(self, exchange_id, symbol, timeframe, start_date, end_
             
             with tqdm(total=total_duration, unit="ms", desc=f"📥 {symbol}", ncols=80) as pbar:
                 while True:
+                    # ✅ ১. স্টপ চেক: লুপের শুরুতে
                     if self.request.id and redis_client.exists(f"abort_task:{self.request.id}"):
-                        print(f"🛑 Download stopped for {symbol}")
-                        return {"status": "stopped", "message": "Stopped by user"}
+                        print(f"🛑 Stop signal received via Redis for task {self.request.id}")
+                        return {"status": "Revoked", "message": "Stopped by user"}
 
                     try:
                         if since >= end_ts: break
 
+                        # ✅ ২. ফেচ করার সময় টাইমআউট সেট করুন যাতে এটি হ্যাং না হয়
+                        exchange.timeout = 10000 # 10 seconds timeout
                         candles = exchange.fetch_ohlcv(symbol, timeframe, since, limit=1000)
+                        
+                        # ✅ ৩. স্টপ চেক: প্রসেসিং এর পরে আবার চেক
+                        if self.request.id and redis_client.exists(f"abort_task:{self.request.id}"):
+                             return {"status": "Revoked", "message": "Stopped by user"}
+                        
                         if not candles: break
                         
                         rows = []
@@ -390,7 +398,8 @@ def download_candles_task(self, exchange_id, symbol, timeframe, start_date, end_
                         if current_ts >= end_ts: break
                         
                     except Exception as e:
-                        time.sleep(2)
+                        print(f"Fetch Error: {e}")
+                        time.sleep(2) # এরর হলে একটু অপেক্ষা
                         continue
 
         return {"status": "completed", "filename": filename}
@@ -448,13 +457,21 @@ def download_trades_task(self, exchange_id, symbol, start_date, end_date=None):
             
             with tqdm(total=total_duration, unit="ms", desc=f"Tick {symbol}", ncols=80) as pbar:
                 while True:
+                    # ✅ ১. স্টপ চেক
                     if self.request.id and redis_client.exists(f"abort_task:{self.request.id}"):
-                          return {"status": "stopped", "message": "Stopped by user"}
+                          return {"status": "Revoked", "message": "Stopped by user"}
 
                     try:
                         if since >= end_ts: break
-
+                        
+                        # ✅ ২. টাইমআউট
+                        exchange.timeout = 10000 
                         trades = exchange.fetch_trades(symbol, since, limit=1000)
+                        
+                        # ✅ ৩. স্টপ চেক
+                        if self.request.id and redis_client.exists(f"abort_task:{self.request.id}"):
+                             return {"status": "Revoked", "message": "Stopped by user"}
+                        
                         if not trades: break
                         
                         rows = []
@@ -477,6 +494,7 @@ def download_trades_task(self, exchange_id, symbol, start_date, end_date=None):
                         if current_ts >= end_ts: break
                         
                     except Exception as e:
+                        print(f"Fetch Trades Error: {e}")
                         time.sleep(2)
                         continue
                     

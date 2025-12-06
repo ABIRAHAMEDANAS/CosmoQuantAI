@@ -375,6 +375,9 @@ const Backtester: React.FC = () => {
     const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
     const [downloadType, setDownloadType] = useState<'candles' | 'trades'>('candles');
     const [dlExchange, setDlExchange] = useState('binance');
+    const [dlMarkets, setDlMarkets] = useState<string[]>([]);
+    const [isLoadingDlMarkets, setIsLoadingDlMarkets] = useState(false);
+
     const [dlSymbol, setDlSymbol] = useState('BTC/USDT');
     const [dlTimeframe, setDlTimeframe] = useState('1h');
     const [dlStartDate, setDlStartDate] = useState('2024-01-01');
@@ -628,6 +631,35 @@ const Backtester: React.FC = () => {
     useEffect(() => {
         return () => { if (pollIntervalRef.current) clearInterval(pollIntervalRef.current); };
     }, []);
+
+    // ✅ নতুন useEffect: যখন ডাউনলোড মোডালে এক্সচেঞ্জ চেঞ্জ হবে, তখন মার্কেট পেয়ার লোড করবে
+    useEffect(() => {
+        const loadDlMarkets = async () => {
+            if (!dlExchange) return;
+            setIsLoadingDlMarkets(true);
+            setDlMarkets([]); // আগের লিস্ট ক্লিয়ার
+            try {
+                // একই API ব্যবহার করছি যা মেইন ড্যাশবোর্ডে ব্যবহার হয়
+                const pairs = await getExchangeMarkets(dlExchange);
+                setDlMarkets(pairs);
+
+                // ডিফল্ট সিম্বল সেট করা (যদি BTC/USDT থাকে)
+                if (pairs.includes('BTC/USDT')) {
+                    setDlSymbol('BTC/USDT');
+                } else if (pairs.length > 0) {
+                    setDlSymbol(pairs[0]);
+                }
+            } catch (error) {
+                console.error("Failed to load markets for downloader", error);
+            } finally {
+                setIsLoadingDlMarkets(false);
+            }
+        };
+
+        if (isDownloadModalOpen) {
+            loadDlMarkets();
+        }
+    }, [dlExchange, isDownloadModalOpen]);
 
     // Sync Context
     useEffect(() => {
@@ -2147,15 +2179,39 @@ const Backtester: React.FC = () => {
                                     <button onClick={() => setDownloadType('trades')} disabled={isDownloading} className={`flex-1 py-2 text-sm font-medium rounded transition-all ${downloadType === 'trades' ? 'bg-white shadow text-brand-primary' : 'text-gray-500 hover:text-gray-700'}`}>Trades (Tick Data)</button>
                                 </div>
 
-                                {/* Inputs */}
+                                {/* Inputs Grid */}
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
                                         <label className="text-xs text-gray-500 mb-1 block">Exchange</label>
-                                        <input value={dlExchange} onChange={(e) => setDlExchange(e.target.value)} disabled={isDownloading} className="w-full p-2 border rounded bg-transparent text-sm" placeholder="binance" />
+                                        <select
+                                            value={dlExchange}
+                                            onChange={(e) => setDlExchange(e.target.value)}
+                                            disabled={isDownloading}
+                                            className="w-full p-2 border rounded bg-white dark:bg-brand-dark/50 border-gray-300 dark:border-gray-700 text-sm"
+                                        >
+                                            {exchanges.map(ex => (
+                                                <option key={ex} value={ex}>{ex.toUpperCase()}</option>
+                                            ))}
+                                        </select>
                                     </div>
                                     <div>
-                                        <label className="text-xs text-gray-500 mb-1 block">Symbol</label>
-                                        <input value={dlSymbol} onChange={(e) => setDlSymbol(e.target.value)} disabled={isDownloading} className="w-full p-2 border rounded bg-transparent text-sm" placeholder="BTC/USDT" />
+                                        <label className="text-xs text-gray-500 mb-1 block">
+                                            Symbol {isLoadingDlMarkets && <span className="animate-pulse text-brand-primary ml-1">(Loading...)</span>}
+                                        </label>
+                                        <select
+                                            value={dlSymbol}
+                                            onChange={(e) => setDlSymbol(e.target.value)}
+                                            disabled={isDownloading || isLoadingDlMarkets}
+                                            className="w-full p-2 border rounded bg-white dark:bg-brand-dark/50 border-gray-300 dark:border-gray-700 text-sm"
+                                        >
+                                            {dlMarkets.length > 0 ? (
+                                                dlMarkets.map(pair => (
+                                                    <option key={pair} value={pair}>{pair}</option>
+                                                ))
+                                            ) : (
+                                                <option disabled>No pairs found</option>
+                                            )}
+                                        </select>
                                     </div>
                                 </div>
 

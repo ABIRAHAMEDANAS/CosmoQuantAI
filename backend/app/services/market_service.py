@@ -1,4 +1,5 @@
 import ccxt.async_support as ccxt
+import os
 import ccxt as ccxt_sync 
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert # ✅ এই ইমপোর্টটি খুব গুরুত্বপূর্ণ
@@ -202,25 +203,44 @@ class MarketService:
         try:
             if hasattr(ccxt, exchange_id):
                 exchange_class = getattr(ccxt, exchange_id)
-                # ✅ FIX: Add Custom User-Agent to bypass Cloudflare
-                temp_exchange = exchange_class({
+                
+                # ✅ ডায়নামিক কনফিগারেশন তৈরি
+                config = {
                     'enableRateLimit': True,
                     'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                })
+                }
+
+                # ✅ এনভায়রনমেন্ট ভেরিয়েবল থেকে API Key খোঁজা (যেকোনো এক্সচেঞ্জের জন্য)
+                # উদাহরণ: ALPACA_API_KEY, BINANCE_API_KEY
+                env_api_key = os.getenv(f"{exchange_id.upper()}_API_KEY")
+                env_secret = os.getenv(f"{exchange_id.upper()}_SECRET")
+
+                if env_api_key and env_secret:
+                    config['apiKey'] = env_api_key
+                    config['secret'] = env_secret
+                
+                # এক্সচেঞ্জ ইনিশিয়ালাইজ করা
+                temp_exchange = exchange_class(config)
+                
                 try:
                     markets = await temp_exchange.load_markets()
                     symbols = list(markets.keys())
                     self._markets_cache[exchange_id] = symbols
                     return symbols
+                except Exception as e:
+                    # যদি ক্রেডেনশিয়াল না থাকে বা ভুল হয়, তখন লগ প্রিন্ট হবে কিন্তু ক্র্যাশ করবে না
+                    print(f"Warning: Could not load markets for {exchange_id}. Reason: {e}")
+                    return []
                 finally:
                     await temp_exchange.close()
             return []
         except Exception as e:
-            print(f"Error fetching markets for {exchange_id}: {e}")
+            print(f"Error initializing {exchange_id}: {e}")
             return []
 
     def get_supported_exchanges(self):
-        return ['binance', 'kraken', 'kucoin', 'bybit', 'okx', 'gateio', 'bitget', 'coinbase']
+        # ccxt লাইব্রেরিতে থাকা সব এক্সচেঞ্জ রিটার্ন করবে
+        return ccxt.exchanges
             
     def get_candles_from_db(self, db: Session, symbol: str, timeframe: str, start_date: str = None, end_date: str = None):
         query = db.query(models.MarketData).filter(
