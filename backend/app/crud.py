@@ -1,13 +1,15 @@
 from sqlalchemy.orm import Session
 from app import models
-from . import schemas, utils
+from app import models
+from . import schemas
+from app.core import security
 
 def get_user_by_email(db: Session, email: str):
     return db.query(models.User).filter(models.User.email == email).first()
 
 def create_user(db: Session, user: schemas.UserCreate):
     # পাসওয়ার্ড হ্যাশ করা হচ্ছে
-    hashed_pwd = utils.hash_password(user.password)
+    hashed_pwd = security.get_password_hash(user.password)
     
     # নতুন ইউজার অবজেক্ট তৈরি
     db_user = models.User(
@@ -24,7 +26,7 @@ def create_user(db: Session, user: schemas.UserCreate):
 
 def create_user_api_key(db: Session, api_key: schemas.ApiKeyCreate, user_id: int):
     # সিক্রেট কি এনক্রিপ্ট করা হচ্ছে
-    encrypted_secret = utils.encrypt_key(api_key.secret_key)
+    encrypted_secret = security.encrypt_key(api_key.secret_key)
     
     db_api_key = models.ApiKey(
         exchange=api_key.exchange,
@@ -44,7 +46,7 @@ def update_user_password(db: Session, email: str, new_password: str):
     user = get_user_by_email(db, email)
     if user:
         # পাসওয়ার্ড হ্যাশ করা হচ্ছে
-        user.hashed_password = utils.hash_password(new_password)
+        user.hashed_password = security.get_password_hash(new_password)
         db.commit()
         db.refresh(user)
     return user

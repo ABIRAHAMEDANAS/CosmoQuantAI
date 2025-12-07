@@ -7,13 +7,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export default defineConfig(({ mode }) => {
-  // পরিবেশ ভেরিয়েবলগুলো লোড করি
   const env = loadEnv(mode, process.cwd(), '');
-
-  // লজিক: যদি এনভায়রনমেন্ট ভেরিয়েবলে URL থাকে সেটা নিবে, না থাকলে লোকালহোস্ট
   const backendUrl = env.VITE_BACKEND_URL || 'http://localhost:8000';
 
-  console.log(`🚀 Proxy targeting: ${backendUrl}`); // কনসোলে দেখার জন্য
+  console.log(`🚀 Proxy targeting: ${backendUrl}`);
 
   return {
     server: {
@@ -34,8 +31,9 @@ export default defineConfig(({ mode }) => {
     },
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
-      }
-    }
+        "@": path.resolve(__dirname, "./src"),
+      },
+    },
+    root: ".",
   };
 });

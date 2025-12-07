@@ -6,15 +6,15 @@ from sqlalchemy import pool
 from alembic import context
 
 # আপনার প্রজেক্টের মডেল এবং বেস ইম্পোর্ট করুন
-from app.models import Base
-from app.database import SQLALCHEMY_DATABASE_URL
+from app.db.base import Base # Import from app.db.base to get all models
+from app.core.config import settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
 # alembic.ini তে ডাটাবেস URL সেট করা (ডাইনামিকালি)
-config.set_main_option("sqlalchemy.url", SQLALCHEMY_DATABASE_URL)
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

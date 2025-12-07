@@ -1,5 +1,5 @@
 from .celery_app import celery_app
-from .database import SessionLocal
+from app.db.session import SessionLocal
 from .services.backtest_engine import BacktestEngine
 import sys
 import math
