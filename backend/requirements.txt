@@ -57,3 +57,4 @@ alembic
 deap
 tqdm
 alpaca-py
+dotenv

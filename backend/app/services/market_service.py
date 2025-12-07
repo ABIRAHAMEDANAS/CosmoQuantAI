@@ -217,6 +217,10 @@ class MarketService:
                 if env_api_key and env_secret:
                     config['apiKey'] = env_api_key
                     config['secret'] = env_secret
+                    
+                    # ✅ Fix: Alpaca Paper Trading support
+                    if exchange_id == 'alpaca' and env_api_key.startswith('PK'):
+                        config['options'] = {'defaultType': 'paper'}  # Use paper trading endpoint
 
                 # এক্সচেঞ্জ ইনিশিয়ালাইজ করার চেষ্টা
                 try:
