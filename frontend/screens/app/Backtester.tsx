@@ -26,6 +26,15 @@ import ParameterHeatmap from '../../components/ui/ParameterHeatmap';
 import { Activity, Layers, PlayIcon, CodeIcon, SaveIcon, UploadCloud, Download, X, AlertCircle, Settings, Info, LayoutGrid, List, FileText, BarChart2, RefreshCw, CheckCircle2 } from 'lucide-react';
 
 // --- Constants ---
+// ব্যাকএন্ডের সাপোর্টেড স্ট্যান্ডার্ড স্ট্র্যাটেজিগুলো
+const STANDARD_STRATEGIES = [
+    "RSI Crossover",
+    "MACD Crossover",
+    "SMA Crossover",
+    "EMA Crossover",
+    "Bollinger Bands"
+];
+
 const TIMEFRAME_OPTIONS: Timeframe[] = [
     // Seconds
     "1s", "5s", "10s", "15s", "30s", "45s",
@@ -1597,8 +1606,18 @@ const Backtester: React.FC = () => {
                                 <div className="md:col-span-2">
                                     <label className="block text-sm font-medium text-gray-500 mb-1">Strategy</label>
                                     <select className={inputBaseClasses} value={strategy} onChange={(e) => setStrategy(e.target.value)}>
-                                        <optgroup label="Standard"><option value="RSI Crossover">RSI Crossover</option></optgroup>
-                                        {customStrategies.length > 0 && <optgroup label="Custom">{customStrategies.map(s => <option key={s} value={s}>{s}</option>)}</optgroup>}
+                                        <optgroup label="Standard">
+                                            {/* ✅ ফিক্স: লুপ চালিয়ে সব স্ট্যান্ডার্ড স্ট্র্যাটেজি দেখানো হচ্ছে */}
+                                            {STANDARD_STRATEGIES.map((s) => (
+                                                <option key={s} value={s}>{s}</option>
+                                            ))}
+                                        </optgroup>
+
+                                        {customStrategies.length > 0 && (
+                                            <optgroup label="Custom">
+                                                {customStrategies.map(s => <option key={s} value={s}>{s}</option>)}
+                                            </optgroup>
+                                        )}
                                     </select>
                                 </div>
                                 <div>
@@ -2040,132 +2059,134 @@ const Backtester: React.FC = () => {
 
 
             {/* ✅ 2. DETAILED VIEW MODAL */}
-            {selectedBatchResult && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
-                    <Card className="w-full max-w-6xl h-[90vh] flex flex-col relative overflow-hidden">
-                        {/* Modal Header */}
-                        <div className="flex justify-between items-center border-b border-gray-200 dark:border-gray-700 pb-4 mb-4">
-                            <div>
-                                <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                                    <Activity className="text-brand-primary" />
-                                    {selectedBatchResult.strategy} Analysis
-                                </h2>
-                                <p className="text-sm text-gray-500">
-                                    {/* ✅ সমাধান: getSafeValue ব্যবহার করা এবং ? (Optional Chaining) ব্যবহার করা */}
-                                    {selectedBatchResult.market} • {selectedBatchResult.timeframe} •
-                                    <span className={getSafeValue(selectedBatchResult, ['profitPercent', 'profit_percent']) >= 0 ? "text-green-500 ml-1" : "text-red-500 ml-1"}>
-                                        {getSafeValue(selectedBatchResult, ['profitPercent', 'profit_percent']).toFixed(2)}% Profit
-                                    </span>
-                                </p>
+            {
+                selectedBatchResult && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fade-in">
+                        <Card className="w-full max-w-6xl h-[90vh] flex flex-col relative overflow-hidden">
+                            {/* Modal Header */}
+                            <div className="flex justify-between items-center border-b border-gray-200 dark:border-gray-700 pb-4 mb-4">
+                                <div>
+                                    <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                        <Activity className="text-brand-primary" />
+                                        {selectedBatchResult.strategy} Analysis
+                                    </h2>
+                                    <p className="text-sm text-gray-500">
+                                        {/* ✅ সমাধান: getSafeValue ব্যবহার করা এবং ? (Optional Chaining) ব্যবহার করা */}
+                                        {selectedBatchResult.market} • {selectedBatchResult.timeframe} •
+                                        <span className={getSafeValue(selectedBatchResult, ['profitPercent', 'profit_percent']) >= 0 ? "text-green-500 ml-1" : "text-red-500 ml-1"}>
+                                            {getSafeValue(selectedBatchResult, ['profitPercent', 'profit_percent']).toFixed(2)}% Profit
+                                        </span>
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => setSelectedBatchResult(null)}
+                                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
+                                >
+                                    <X size={24} className="text-gray-500" />
+                                </button>
                             </div>
-                            <button
-                                onClick={() => setSelectedBatchResult(null)}
-                                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
-                            >
-                                <X size={24} className="text-gray-500" />
-                            </button>
-                        </div>
 
-                        {/* Scrollable Content */}
-                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-6 pr-2">
-                            {/* Chart */}
-                            <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg p-1 h-[400px]">
-                                {selectedBatchResult.candle_data && selectedBatchResult.candle_data.length > 0 ? (
-                                    <BacktestChart
-                                        data={selectedBatchResult.candle_data}
-                                        trades={selectedBatchResult.trades_log || []}
+                            {/* Scrollable Content */}
+                            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-6 pr-2">
+                                {/* Chart */}
+                                <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg p-1 h-[400px]">
+                                    {selectedBatchResult.candle_data && selectedBatchResult.candle_data.length > 0 ? (
+                                        <BacktestChart
+                                            data={selectedBatchResult.candle_data}
+                                            trades={selectedBatchResult.trades_log || []}
+                                        />
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                                            <AlertCircle size={32} className="mb-2 opacity-50" />
+                                            <p>Chart data not available for this run.</p>
+                                            <p className="text-xs mt-1">(Run a single backtest to see detailed charts)</p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Metrics Grid (Safe Version) */}
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <MetricCard
+                                        label="Net Profit"
+                                        value={getSafeValue(selectedBatchResult, ['final_value']) - getSafeValue(selectedBatchResult, ['initial_cash', 'initialCash']) || 0}
+                                        prefix="$"
+                                        positive={getSafeValue(selectedBatchResult, ['profitPercent', 'profit_percent']) >= 0}
                                     />
-                                ) : (
-                                    <div className="flex flex-col items-center justify-center h-full text-gray-500">
-                                        <AlertCircle size={32} className="mb-2 opacity-50" />
-                                        <p>Chart data not available for this run.</p>
-                                        <p className="text-xs mt-1">(Run a single backtest to see detailed charts)</p>
+                                    <MetricCard
+                                        label="Total Trades"
+                                        value={getSafeValue(selectedBatchResult, ['total_trades', 'totalTrades'])}
+                                        decimals={0}
+                                    />
+                                    <MetricCard
+                                        label="Win Rate"
+                                        value={getSafeValue(selectedBatchResult, ['winRate', 'win_rate'])}
+                                        suffix="%"
+                                    />
+                                    <MetricCard
+                                        label="Max Drawdown"
+                                        value={getSafeValue(selectedBatchResult, ['maxDrawdown', 'max_drawdown'])}
+                                        suffix="%"
+                                        positive={false}
+                                    />
+                                </div>
+
+                                {/* ✅ NEW: Parameter Configuration Section (Fix for displaying settings) */}
+                                {selectedBatchResult.params && Object.keys(selectedBatchResult.params).length > 0 && (
+                                    <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg p-4 mb-4 mt-4">
+                                        <div className="flex items-center gap-2 mb-3 border-b border-[#2A2E39] pb-2">
+                                            <Settings className="h-4 w-4 text-yellow-500" />
+                                            <h3 className="text-sm font-semibold text-gray-200">Winning Strategy Parameters</h3>
+                                        </div>
+                                        <div className="flex flex-wrap gap-3">
+                                            {Object.entries(selectedBatchResult.params).map(([key, value]) => (
+                                                <div key={key} className="flex flex-col bg-[#1e222d] px-3 py-2 rounded border border-[#2A2E39]">
+                                                    <span className="text-[10px] text-gray-500 uppercase font-bold">{key}</span>
+                                                    <span className="text-sm font-mono text-yellow-400 font-bold">
+                                                        {typeof value === 'number' ? value.toString() : String(value)}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Trade Log */}
+                                {selectedBatchResult.trades_log && selectedBatchResult.trades_log.length > 0 && (
+                                    <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg">
+                                        <div className="px-4 py-3 bg-[#1e222d] border-b border-[#2A2E39]">
+                                            <h3 className="text-sm font-semibold text-gray-200">Recent Trades</h3>
+                                        </div>
+                                        <div className="max-h-[250px] overflow-y-auto custom-scrollbar">
+                                            <table className="w-full text-xs text-left">
+                                                <thead className="bg-[#1e222d] text-gray-400 sticky top-0">
+                                                    <tr>
+                                                        <th className="px-4 py-2">Type</th>
+                                                        <th className="px-4 py-2">Price</th>
+                                                        <th className="px-4 py-2 text-right">P/L</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {selectedBatchResult.trades_log.map((trade: any, idx: number) => (
+                                                        <tr key={idx} className="border-b border-[#2A2E39] hover:bg-[#2A2E39]">
+                                                            <td className={`px-4 py-2 font-bold ${trade.side === 'BUY' ? 'text-green-500' : 'text-red-500'}`}>
+                                                                {trade.side}
+                                                            </td>
+                                                            <td className="px-4 py-2 font-mono text-gray-300">{trade.price.toFixed(2)}</td>
+                                                            <td className={`px-4 py-2 text-right font-mono ${trade.pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                                                {trade.pnl ? trade.pnl.toFixed(2) : '-'}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     </div>
                                 )}
                             </div>
-
-                            {/* Metrics Grid (Safe Version) */}
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <MetricCard
-                                    label="Net Profit"
-                                    value={getSafeValue(selectedBatchResult, ['final_value']) - getSafeValue(selectedBatchResult, ['initial_cash', 'initialCash']) || 0}
-                                    prefix="$"
-                                    positive={getSafeValue(selectedBatchResult, ['profitPercent', 'profit_percent']) >= 0}
-                                />
-                                <MetricCard
-                                    label="Total Trades"
-                                    value={getSafeValue(selectedBatchResult, ['total_trades', 'totalTrades'])}
-                                    decimals={0}
-                                />
-                                <MetricCard
-                                    label="Win Rate"
-                                    value={getSafeValue(selectedBatchResult, ['winRate', 'win_rate'])}
-                                    suffix="%"
-                                />
-                                <MetricCard
-                                    label="Max Drawdown"
-                                    value={getSafeValue(selectedBatchResult, ['maxDrawdown', 'max_drawdown'])}
-                                    suffix="%"
-                                    positive={false}
-                                />
-                            </div>
-
-                            {/* ✅ NEW: Parameter Configuration Section (Fix for displaying settings) */}
-                            {selectedBatchResult.params && Object.keys(selectedBatchResult.params).length > 0 && (
-                                <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg p-4 mb-4 mt-4">
-                                    <div className="flex items-center gap-2 mb-3 border-b border-[#2A2E39] pb-2">
-                                        <Settings className="h-4 w-4 text-yellow-500" />
-                                        <h3 className="text-sm font-semibold text-gray-200">Winning Strategy Parameters</h3>
-                                    </div>
-                                    <div className="flex flex-wrap gap-3">
-                                        {Object.entries(selectedBatchResult.params).map(([key, value]) => (
-                                            <div key={key} className="flex flex-col bg-[#1e222d] px-3 py-2 rounded border border-[#2A2E39]">
-                                                <span className="text-[10px] text-gray-500 uppercase font-bold">{key}</span>
-                                                <span className="text-sm font-mono text-yellow-400 font-bold">
-                                                    {typeof value === 'number' ? value.toString() : String(value)}
-                                                </span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Trade Log */}
-                            {selectedBatchResult.trades_log && selectedBatchResult.trades_log.length > 0 && (
-                                <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg">
-                                    <div className="px-4 py-3 bg-[#1e222d] border-b border-[#2A2E39]">
-                                        <h3 className="text-sm font-semibold text-gray-200">Recent Trades</h3>
-                                    </div>
-                                    <div className="max-h-[250px] overflow-y-auto custom-scrollbar">
-                                        <table className="w-full text-xs text-left">
-                                            <thead className="bg-[#1e222d] text-gray-400 sticky top-0">
-                                                <tr>
-                                                    <th className="px-4 py-2">Type</th>
-                                                    <th className="px-4 py-2">Price</th>
-                                                    <th className="px-4 py-2 text-right">P/L</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {selectedBatchResult.trades_log.map((trade: any, idx: number) => (
-                                                    <tr key={idx} className="border-b border-[#2A2E39] hover:bg-[#2A2E39]">
-                                                        <td className={`px-4 py-2 font-bold ${trade.side === 'BUY' ? 'text-green-500' : 'text-red-500'}`}>
-                                                            {trade.side}
-                                                        </td>
-                                                        <td className="px-4 py-2 font-mono text-gray-300">{trade.price.toFixed(2)}</td>
-                                                        <td className={`px-4 py-2 text-right font-mono ${trade.pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                                                            {trade.pnl ? trade.pnl.toFixed(2) : '-'}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </Card>
-                </div>
-            )}
+                        </Card>
+                    </div>
+                )
+            }
 
             {/* DOWNLOAD MODAL */}
             {
