@@ -269,13 +269,14 @@ def get_last_timestamp(file_path):
             if not last_line: return None
             data = last_line.split(',')
             
-            if len(data) > 1 and data[1].isdigit():
-                return int(data[1])
             if len(data) > 0:
                  try:
+                    # আপনার CSV তে ডেট ফরম্যাট 'YYYY-MM-DD HH:MM:SS' হিসেবে সেভ হচ্ছে
                     dt_obj = datetime.strptime(data[0], "%Y-%m-%d %H:%M:%S")
                     return int(dt_obj.timestamp() * 1000)
-                 except: pass
+                 except ValueError:
+                    # যদি কোনো কারণে ফরম্যাট না মিলে
+                    pass
     except Exception:
         return None
     return None

@@ -113,3 +113,8 @@ class DownloadRequest(BaseModel):
     start_date: str
     end_date: Optional[str] = None
     timeframe: Optional[str] = "1h"
+
+# Data Conversion Schema
+class ConversionRequest(BaseModel):
+    filename: str
+    timeframe: str = "1min" # Default value

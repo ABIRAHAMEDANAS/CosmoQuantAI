@@ -357,12 +357,12 @@ def get_market_data(
     formatted_data = []
     for c in candles:
         formatted_data.append({
-            "time": c.timestamp.isoformat(), # Recharts এ ISO স্ট্রিং সুবিধা দেয়
-            "open": c.open,
-            "high": c.high,
-            "low": c.low,
-            "close": c.close,
-            "volume": c.volume
+            "time": c[0].isoformat(), # Recharts এ ISO স্ট্রিং সুবিধা দেয়
+            "open": c[1],
+            "high": c[2],
+            "low": c[3],
+            "close": c[4],
+            "volume": c[5]
         })
     
     return formatted_data
@@ -477,45 +477,35 @@ def get_strategy_source(strategy_name: str, current_user: models.User = Depends(
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             code = f.read()
 
-        # ২. ডাইনামিকালি প্যারামিটার এক্সট্রাক্ট করা
+        # ২. ডাইনামিকালি প্যারামিটার এক্সট্রাক্ট করা (নিরাপদ AST মেথড)
         extracted_params = {}
         
         try:
-            spec = importlib.util.spec_from_file_location("temp_strategy_module", file_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-
-            target_class = None
-            for name, obj in inspect.getmembers(module):
-                if inspect.isclass(obj) and issubclass(obj, bt.Strategy) and obj is not bt.Strategy:
-                    target_class = obj
-                    break
+            # নিরাপদ পার্সার ইমপোর্ট
+            from app.strategy_parser import parse_strategy_params
+            raw_params_dict = parse_strategy_params(file_path)
             
-            if target_class and hasattr(target_class, 'params'):
-                raw_params = target_class.params._getitems()
-                
-                for key, default_val in raw_params:
-                    if isinstance(default_val, (int, float)) and not isinstance(default_val, bool):
-                        # প্যারামিটার ডিটেকশন লজিক...
-                        is_int = isinstance(default_val, int)
-                        min_val = 0 if default_val >= 0 else default_val * 2
-                        if default_val > 0:
-                            min_val = 1 if is_int else 0.1
-                        
-                        max_val = default_val * 5 if default_val > 0 else 0
-                        if max_val == 0: max_val = 100
-                        
-                        step = 1 if is_int else round(default_val / 10, 3) or 0.01
+            for key, default_val in raw_params_dict.items():
+                if isinstance(default_val, (int, float)) and not isinstance(default_val, bool):
+                    # প্যারামিটার ডিটেকশন লজিক...
+                    is_int = isinstance(default_val, int)
+                    min_val = 0 if default_val >= 0 else default_val * 2
+                    if default_val > 0:
+                        min_val = 1 if is_int else 0.1
+                    
+                    max_val = default_val * 5 if default_val > 0 else 0
+                    if max_val == 0: max_val = 100
+                    
+                    step = 1 if is_int else round(default_val / 10, 3) or 0.01
 
-                        extracted_params[key] = {
-                            "type": "number",
-                            "label": key.replace('_', ' ').title(),
-                            "default": default_val,
-                            "min": min_val,
-                            "max": max_val,
-                            "step": step
-                        }
-
+                    extracted_params[key] = {
+                        "type": "number",
+                        "label": key.replace('_', ' ').title(),
+                        "default": default_val,
+                        "min": min_val,
+                        "max": max_val,
+                        "step": step
+                    }
         except Exception as e:
             print(f"Auto-param detection failed: {e}")
             pass
@@ -653,10 +643,11 @@ def run_optimization(
     request: schemas.OptimizationRequest,
     current_user: models.User = Depends(auth.get_current_user)
 ):
-    # 🔴 ফিক্স: Pydantic মডেলকে সাধারণ ডিকশনারিতে কনভার্ট করা হচ্ছে
-    # request.params হলো dict[str, OptimizationParam]
-    # আমরা একে dict[str, dict] এ কনভার্ট করব
-    params_dict = {k: v.model_dump() for k, v in request.params.items()}
+    # ✅ ফিক্স: নিশ্চিত করা যে params ডিকশনারি ফরম্যাটে যাচ্ছে
+    params_dict = {}
+    for k, v in request.params.items():
+        # যদি v Pydantic মডেল হয় তবে dict()-এ কনভার্ট, না হলে সরাসরি ব্যবহার
+        params_dict[k] = v.model_dump() if hasattr(v, 'model_dump') else v
     
     # Celery টাস্কে পাঠানো
     task = run_optimization_task.delay(
@@ -752,8 +743,6 @@ def get_download_status(task_id: str):
 
 # --- Data Conversion Endpoint ---
 
-class ConversionRequest(BaseModel):
-    filename: str
 
 @app.get("/api/v1/list-trade-files")
 def list_trade_files():
@@ -765,7 +754,7 @@ def list_trade_files():
     files = [f for f in os.listdir(target_dir) if f.startswith("trades_") and f.endswith(".csv")]
     return files
 @app.post("/api/v1/convert-data")
-async def run_data_conversion(request: ConversionRequest): # এখানে request প্যারামিটার যোগ করা হয়েছে
+async def run_data_conversion(request: schemas.ConversionRequest): # schemas.ConversionRequest ব্যবহার করা হয়েছে
     try:
         target_dir = DATA_FEED_DIR 
         if not os.path.exists(target_dir):
@@ -785,18 +774,26 @@ async def run_data_conversion(request: ConversionRequest): # এখানে req
 
         converted_count = 0
         
+        # টাইমফ্রেম ম্যাপিং
+        tf_map = {'1m': '1min', '5m': '5min', '15m': '15min', '30m': '30min', '1h': '1h', '4h': '4h', '1d': '1D'}
+        # পান্ডাস এর জন্য সঠিক টাইমফ্রেম স্ট্রিং
+        pandas_tf = tf_map.get(request.timeframe, '1min') 
+        
         for trade_file in files:
             file_path = os.path.join(target_dir, trade_file)
             
             # ডাটা রিড
-            df = pd.read_csv(file_path, usecols=['datetime', 'price', 'amount'])
-            df['datetime'] = pd.to_datetime(df['datetime'])
-            df.set_index('datetime', inplace=True)
+            try:
+                df = pd.read_csv(file_path, usecols=['datetime', 'price', 'amount'])
+                df['datetime'] = pd.to_datetime(df['datetime'])
+                df.set_index('datetime', inplace=True)
+            except Exception as e:
+                print(f"Skipping {trade_file}: {e}")
+                continue
 
-            # রিস্যাম্পলিং
-            timeframe = '1min' 
-            ohlc = df['price'].resample(timeframe).ohlc()
-            volume = df['amount'].resample(timeframe).sum()
+            # রিস্যাম্পলিং ডাইনামিক টাইমফ্রেম দিয়ে
+            ohlc = df['price'].resample(pandas_tf).ohlc()
+            volume = df['amount'].resample(pandas_tf).sum()
             volume.name = 'volume' 
 
             candles = pd.concat([ohlc, volume], axis=1)
@@ -808,8 +805,8 @@ async def run_data_conversion(request: ConversionRequest): # এখানে req
             candles['low'] = candles['low'].fillna(candles['close'])
             candles['volume'] = candles['volume'].fillna(0)
 
-            # সেভ
-            output_filename = trade_file.replace('trades_', f'candles_{timeframe}_')
+            # সেভ (ফাইলের নাম টাইমফ্রেম অনুযায়ী হবে)
+            output_filename = trade_file.replace('trades_', f'candles_{request.timeframe}_')
             output_path = os.path.join(target_dir, output_filename)
             
             candles.reset_index(inplace=True)

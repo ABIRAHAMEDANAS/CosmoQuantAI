@@ -137,7 +137,8 @@ const RangeSliderInput: React.FC<{
     }, [startNum, endNum, getPercent]);
 
     const handleValueChange = (field: 'start' | 'end' | 'step', val: string | number) => {
-        const newValues = { ...value, [field]: val };
+        const numVal = Number(val);
+        const newValues = { ...value, [field]: numVal };
         let s = Number(newValues.start);
         let e = Number(newValues.end);
         if (field === 'start') s = Math.min(s, e);
@@ -1175,14 +1176,16 @@ const Backtester: React.FC = () => {
 
             // 2. Poll for Status
             // 2. Poll for Status
+            // 2. Poll for Status
             const intervalId = setInterval(async () => {
                 try {
                     const statusData = await getTaskStatus(taskId);
-                    console.log("Poll Status:", statusData); // Debug log
+                    console.log("Poll Status:", statusData);
 
-                    // Condition check update
-                    if (statusData.state === 'PROGRESS' || statusData.status === 'Processing') {
-                        // Get progress from metadata (sometimes percent is at root, sometimes in meta)
+                    // ✅ ফিক্স: ব্যাকএন্ড 'status' বা 'state' যা-ই পাঠাক, দুটোই চেক করা
+                    const currentStatus = statusData.status || statusData.state;
+
+                    if (currentStatus === 'PROGRESS' || currentStatus === 'Processing') {
                         const percent = statusData.percent || statusData.meta?.percent || 0;
                         const message = statusData.message || statusData.meta?.status || "Processing...";
 
@@ -1190,29 +1193,22 @@ const Backtester: React.FC = () => {
                         setBatchStatusMsg(`${message} (${percent}%)`);
                     }
 
-                    // 3. কাজ শেষ হলে (SUCCESS বা Completed)
-                    if (statusData.state === 'SUCCESS' || statusData.status === 'Completed') {
+                    if (currentStatus === 'SUCCESS' || currentStatus === 'Completed') {
                         clearInterval(intervalId);
                         setIsBatchRunning(false);
                         setBatchProgress(100);
                         setBatchStatusMsg("✅ Batch Test Completed!");
 
-                        // ✅ Safe Data Setting
-                        // আমরা চেক করব result এবং results আসলে আছে কি না
                         const finalResults = statusData.result?.results || statusData.results || [];
-                        console.log("Setting Results:", finalResults); // কনসোলে চেক করার জন্য
                         setBatchResults(finalResults);
-
                         setShowResults(true);
                         showToast('Batch Analysis Completed!', 'success');
                     }
 
-                    // Failed
-                    if (statusData.state === 'FAILURE' || statusData.status === 'Failed') {
+                    if (currentStatus === 'FAILURE' || currentStatus === 'Failed') {
                         clearInterval(intervalId);
                         setIsBatchRunning(false);
                         setBatchStatusMsg("❌ Batch Test Failed");
-                        console.error("Task Failed:", statusData.error);
                         showToast(`Batch Failed: ${statusData.error}`, 'error');
                     }
 
@@ -1749,10 +1745,14 @@ const Backtester: React.FC = () => {
                                         )}
                                     </div>
 
-                                    {/* NEW: Underwater Drawdown Chart */}
+                                    {/* NEW: Underwater Drawdown Chart with Safety Check */}
                                     <div className="h-[200px] border-t border-[#2A2E39] mt-1">
                                         <UnderwaterChart
-                                            data={singleResult.underwater_data || calculateDrawdownFromCandles(singleResult.candle_data)}
+                                            data={
+                                                (singleResult.underwater_data && singleResult.underwater_data.length > 0)
+                                                    ? singleResult.underwater_data
+                                                    : calculateDrawdownFromCandles(singleResult.candle_data || [])
+                                            }
                                             height={200}
                                         />
                                     </div>

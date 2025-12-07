@@ -9,6 +9,7 @@ from app.constants import VALID_TIMEFRAMES
 import asyncio
 from tqdm import tqdm
 from app.services.websocket_manager import manager
+from fastapi.concurrency import run_in_threadpool
 
 class MarketService:
     def __init__(self):
@@ -63,7 +64,7 @@ class MarketService:
                     await self._broadcast_progress(symbol, safe_symbol, 0, "Fetching latest data...")
 
                     ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-                    count = self._save_candles(db, ohlcv, symbol, timeframe)
+                    count = await run_in_threadpool(self._save_candles, db, ohlcv, symbol, timeframe)
                     
                     # শেষ হলে ১০০% মেসেজ পাঠানো
                     await self._broadcast_progress(symbol, safe_symbol, 100, "Latest data synced!")
@@ -95,7 +96,7 @@ class MarketService:
                         break
                     
                     filtered_ohlcv = [c for c in ohlcv if c[0] <= end_ts]
-                    saved_count = self._save_candles(db, filtered_ohlcv, symbol, timeframe)
+                    saved_count = await run_in_threadpool(self._save_candles, db, filtered_ohlcv, symbol, timeframe)
                     total_saved += saved_count
                     
                     if not filtered_ohlcv:
@@ -115,7 +116,7 @@ class MarketService:
 
                     # পরবর্তী লুপের জন্য সময় সেট করা
                     if last_time == current_since:
-                        current_since += tf_ms * 1000
+                        current_since += tf_ms
                     else:
                         current_since = last_time + tf_ms
                     
@@ -249,10 +250,18 @@ class MarketService:
         return ccxt.exchanges
             
     def get_candles_from_db(self, db: Session, symbol: str, timeframe: str, start_date: str = None, end_date: str = None):
-        query = db.query(models.MarketData).filter(
+        query = db.query(
+            models.MarketData.timestamp,
+            models.MarketData.open,
+            models.MarketData.high,
+            models.MarketData.low,
+            models.MarketData.close,
+            models.MarketData.volume
+        ).filter(
             models.MarketData.symbol == symbol,
             models.MarketData.timeframe == timeframe
         )
+
         if start_date:
             try:
                 start_dt = datetime.strptime(start_date, "%Y-%m-%d")

@@ -10,6 +10,7 @@ from app.strategies import STRATEGY_MAP
 import random
 import itertools
 import os
+import importlib
 import importlib.util
 import sys
 import asyncio
@@ -66,12 +67,21 @@ class BacktestEngine:
                     df.columns = [c.lower().strip() for c in df.columns]
                     
                     # ✅ IMPROVED DATE PARSING
+                    # ✅ IMPROVED DATE PARSING & VALIDATION
                     if 'datetime' in df.columns:
-                        df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce') # Errors handle kora
-                        df.dropna(subset=['datetime'], inplace=True) # Invalid date row baad dewa
+                        # errors='coerce' reduces invalid formats to NaT
+                        df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce') 
+                        
+                        # Return error if all dates are invalid
+                        if df['datetime'].isnull().all():
+                            return {"error": "CSV Date format invalid. Use YYYY-MM-DD HH:MM:SS format."}
+                            
+                        df.dropna(subset=['datetime'], inplace=True)
                         df.set_index('datetime', inplace=True)
                     elif 'date' in df.columns:
                         df['datetime'] = pd.to_datetime(df['date'], errors='coerce')
+                        if df['datetime'].isnull().all():
+                            return {"error": "CSV Date format invalid."}
                         df.dropna(subset=['datetime'], inplace=True)
                         df.set_index('datetime', inplace=True)
                         
@@ -101,14 +111,8 @@ class BacktestEngine:
             if not candles or len(candles) < 20:
                  return {"error": "Insufficient Data in Database."}
 
-            df = pd.DataFrame([{
-                'datetime': c.timestamp,
-                'open': c.open,
-                'high': c.high,
-                'low': c.low,
-                'close': c.close,
-                'volume': c.volume
-            } for c in candles])
+            # Optimization: Using direct tuple to DataFrame conversion for speed
+            df = pd.DataFrame(candles, columns=['datetime', 'open', 'high', 'low', 'close', 'volume'])
             df.set_index('datetime', inplace=True)
 
         clean_params = {}
@@ -147,7 +151,13 @@ class BacktestEngine:
         cerebro.addstrategy(strategy_class, **valid_params)
 
         cerebro.broker.setcash(initial_cash)
-        cerebro.broker.setcommission(commission=commission)
+        cerebro.broker.setcommission(
+            commission=commission, 
+            commtype=bt.CommInfoBase.COMM_PERC, 
+            margin=None, 
+            mult=1.0, 
+            stocklike=True 
+        )
         if slippage > 0:
             cerebro.broker.set_slippage_perc(perc=slippage)
         
@@ -156,6 +166,7 @@ class BacktestEngine:
         cerebro.addanalyzer(bt.analyzers.PyFolio, _name='pyfolio')
         cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trades")
         cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
+        cerebro.addanalyzer(bt.analyzers.Transactions, _name="transactions") # ✅ Added for fallback history
 
         start_value = cerebro.broker.getvalue()
         results = cerebro.run() 
@@ -164,6 +175,21 @@ class BacktestEngine:
 
         qs_metrics = self._calculate_metrics(first_strat, start_value, end_value)
         executed_trades = getattr(first_strat, 'trade_history', [])
+        
+        # ✅ FIX: Fallback for Standard Strategies (Use Transactions Analyzer)
+        if not executed_trades:
+            trans_anal = first_strat.analyzers.transactions.get_analysis()
+            for dt, trans_list in trans_anal.items():
+                for trans in trans_list:
+                    size = trans[0]
+                    price = trans[1]
+                    executed_trades.append({
+                        "type": "buy" if size > 0 else "sell",
+                        "price": price,
+                        "size": abs(size),
+                        "time": int(dt.timestamp())
+                    })
+            executed_trades.sort(key=lambda x: x['time'])
         
         df['time'] = df.index.astype('int64') // 10**9 
         chart_candles = df[['time', 'open', 'high', 'low', 'close', 'volume']].to_dict(orient='records')
@@ -206,9 +232,7 @@ class BacktestEngine:
         if not candles or len(candles) < 20:
             return {"error": f"Insufficient Data for {symbol}."}
 
-        df = pd.DataFrame([{
-            'datetime': c.timestamp, 'open': c.open, 'high': c.high, 'low': c.low, 'close': c.close, 'volume': c.volume
-        } for c in candles])
+        df = pd.DataFrame(candles, columns=['datetime', 'open', 'high', 'low', 'close', 'volume'])
         df.set_index('datetime', inplace=True)
         
         param_ranges = {} 
@@ -330,7 +354,13 @@ class BacktestEngine:
         cerebro.addstrategy(strategy_class, **valid_params)
         
         cerebro.broker.setcash(initial_cash)
-        cerebro.broker.setcommission(commission=commission)
+        cerebro.broker.setcommission(
+            commission=commission, 
+            commtype=bt.CommInfoBase.COMM_PERC, 
+            margin=None, 
+            mult=1.0, 
+            stocklike=True 
+        )
         if slippage > 0:
             cerebro.broker.set_slippage_perc(perc=slippage)
             
@@ -366,10 +396,16 @@ class BacktestEngine:
                 file_path = f"app/strategies/custom/{file_name}"
                 if os.path.exists(file_path):
                     module_name = file_name.replace('.py', '')
-                    spec = importlib.util.spec_from_file_location(module_name, file_path)
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
-                    sys.modules[module_name] = module
+                    
+                    # ✅ FIX: Hot Reloading
+                    if module_name in sys.modules:
+                         module = importlib.reload(sys.modules[module_name])
+                    else:
+                        spec = importlib.util.spec_from_file_location(module_name, file_path)
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                        sys.modules[module_name] = module
+                        
                     for name, obj in inspect.getmembers(module):
                         if inspect.isclass(obj) and issubclass(obj, bt.Strategy) and obj is not bt.Strategy:
                             return obj
