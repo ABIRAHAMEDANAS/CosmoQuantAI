@@ -155,16 +155,25 @@ def run_optimization_task(self, symbol: str, timeframe: str, strategy_name: str,
         db.close()
 
 @celery_app.task(bind=True)
-def run_batch_backtest_task(self, symbol: str, timeframe: str, initial_cash: float, start_date: str = None, end_date: str = None, commission: float = 0.001, slippage: float = 0.0):
+def run_batch_backtest_task(self, symbol: str, timeframe: str, initial_cash: float, strategies: list = None, start_date: str = None, end_date: str = None, commission: float = 0.001, slippage: float = 0.0):
     db = SessionLocal()
     engine = BacktestEngine()
     
     results = []
     errors = []
     
-    # ১. সব স্ট্র্যাটেজির নাম সংগ্রহ
-    builtin_strategies = ["SMA Crossover", "RSI Crossover", "MACD Crossover", "EMA Crossover", "Bollinger Bands"]
-    available_strategies = [s for s in STRATEGY_MAP.keys() if s not in builtin_strategies]
+    # ✅ ফিক্স: ফ্রন্টএন্ড থেকে পাঠানো স্ট্র্যাটেজি লিস্ট ব্যবহার করা হবে
+    if strategies and len(strategies) > 0:
+        # শুধু মাত্র ভ্যালিড স্ট্র্যাটেজিগুলো নেওয়া হবে যা আমাদের ম্যাপে আছে
+        available_strategies = [s for s in strategies if s in STRATEGY_MAP]
+        
+        # যদি কোনো কারণে লিস্ট না মিলে, তবে সব রান করবে (ফলব্যাক)
+        if not available_strategies:
+            available_strategies = list(STRATEGY_MAP.keys())
+    else:
+        # কোনো লিস্ট না দিলে সব স্ট্র্যাটেজি রান হবে (স্ট্যান্ডার্ড + কাস্টম)
+        available_strategies = list(STRATEGY_MAP.keys())
+
     total = len(available_strategies)
     
     print(f"🚀 Starting Batch Task for {total} strategies on {symbol}")
@@ -173,7 +182,7 @@ def run_batch_backtest_task(self, symbol: str, timeframe: str, initial_cash: flo
         # ১. প্রোগ্রেস ক্যালকুলেশন
         current_progress = int((i / total) * 100)
         
-        # ২. কনসোলে প্রিন্ট (ব্যাকএন্ডে দেখার জন্য)
+        # ২. কনসোলে প্রিন্ট
         print(f"🔄 [{i+1}/{total}] Testing {strategy_name}... ({current_progress}%)", flush=True)
 
         # ৩. Celery স্টেট আপডেট
@@ -187,7 +196,6 @@ def run_batch_backtest_task(self, symbol: str, timeframe: str, initial_cash: flo
             }
         )
         
-        # ⚠️ গুরুত্বপূর্ণ: স্টেট আপডেট যাতে ডাটাবেস/রেডিসে সেভ হওয়ার সময় পায়
         time.sleep(0.1) 
 
         try:
@@ -228,7 +236,6 @@ def run_batch_backtest_task(self, symbol: str, timeframe: str, initial_cash: flo
     # ৫. প্রফিট অনুযায়ী সর্ট করা
     results.sort(key=lambda x: x['profit_percent'], reverse=True)
     
-    # ফাইনাল প্রিন্ট
     print(f"✅ Batch Task Completed! Scanned {len(results)} strategies.")
 
     return {
