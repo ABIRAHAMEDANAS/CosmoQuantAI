@@ -347,7 +347,7 @@ class BacktestEngine:
         
         strategy_class = self._load_strategy_class(strategy_name)
         if not strategy_class:
-            return {"profitPercent": 0, "maxDrawdown": 0, "sharpeRatio": 0}
+            return {"profitPercent": 0, "maxDrawdown": 0, "sharpeRatio": 0, "total_trades": 0, "winRate": 0}
 
         # ✅ Use Enhanced Filter Params
         valid_params = self._filter_params(strategy_class, clean_params)
@@ -365,6 +365,9 @@ class BacktestEngine:
             cerebro.broker.set_slippage_perc(perc=slippage)
             
         cerebro.addsizer(bt.sizers.PercentSizer, percents=90)
+        
+        # ✅ 1. Add Analyzer for Trades (This was missing)
+        cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trades")
         cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
         cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe", riskfreerate=0.0)
         
@@ -379,38 +382,75 @@ class BacktestEngine:
             
             sharpe = strat.analyzers.sharpe.get_analysis()
             sharpe_ratio = sharpe.get('sharperatio', 0) or 0
+
+            # ✅ 2. Calculate Total Trades & Win Rate (Added Logic)
+            trade_analysis = strat.analyzers.trades.get_analysis()
+            total_closed = trade_analysis.get('total', {}).get('closed', 0)
+            won_trades = trade_analysis.get('won', {}).get('total', 0)
+            win_rate = (won_trades / total_closed * 100) if total_closed > 0 else 0
             
             return {
                 "profitPercent": round(profit_percent, 2),
                 "maxDrawdown": round(max_drawdown, 2),
-                "sharpeRatio": round(sharpe_ratio, 2)
+                "sharpeRatio": round(sharpe_ratio, 2),
+                "total_trades": total_closed,
+                "winRate": round(win_rate, 2),
+                "final_value": round(end_value, 2),
+                "initial_cash": initial_cash
             }
         except Exception:
-            return {"profitPercent": 0, "maxDrawdown": 0, "sharpeRatio": 0}
+            return {
+                "profitPercent": 0, 
+                "maxDrawdown": 0, 
+                "sharpeRatio": 0, 
+                "total_trades": 0, 
+                "winRate": 0,
+                "final_value": initial_cash,
+                "initial_cash": initial_cash
+            }
 
     def _load_strategy_class(self, strategy_name):
         strategy_class = STRATEGY_MAP.get(strategy_name)
+        
         if not strategy_class:
             try:
+                # 1. Reliable Path Resolution
+                current_file_dir = os.path.dirname(os.path.abspath(__file__))
+                custom_strategies_dir = os.path.join(current_file_dir, '..', 'strategies', 'custom')
+                custom_strategies_dir = os.path.normpath(custom_strategies_dir)
+
                 file_name = f"{strategy_name}.py" if not strategy_name.endswith(".py") else strategy_name
-                file_path = f"app/strategies/custom/{file_name}"
+                file_path = os.path.join(custom_strategies_dir, file_name)
+
                 if os.path.exists(file_path):
                     module_name = file_name.replace('.py', '')
                     
-                    # ✅ FIX: Hot Reloading
+                    # ✅ FIX: importlib.reload এর পরিবর্তে মডিউল রিমুভ করে নতুন করে লোড করা
                     if module_name in sys.modules:
-                         module = importlib.reload(sys.modules[module_name])
-                    else:
-                        spec = importlib.util.spec_from_file_location(module_name, file_path)
+                        del sys.modules[module_name]  # Force clean reload
+                    
+                    # 2. Fresh Load
+                    spec = importlib.util.spec_from_file_location(module_name, file_path)
+                    if spec and spec.loader:
                         module = importlib.util.module_from_spec(spec)
+                        sys.modules[module_name] = module # Register new module
                         spec.loader.exec_module(module)
-                        sys.modules[module_name] = module
+                    else:
+                        print(f"❌ Error: Could not create spec for {module_name} at {file_path}")
+                        return None
                         
+                    # 3. Find Strategy Class
                     for name, obj in inspect.getmembers(module):
                         if inspect.isclass(obj) and issubclass(obj, bt.Strategy) and obj is not bt.Strategy:
                             return obj
+                else:
+                    print(f"❌ Strategy file NOT found at: {file_path}")
+
             except Exception as e:
-                print(f"Error loading custom strategy: {e}")
+                import traceback
+                print(f"❌ Exception loading custom strategy '{strategy_name}': {e}")
+                # traceback.print_exc() # Optional: বিস্তারিত লগের জন্য আনকমেন্ট করতে পারেন
+
         return strategy_class
 
     # ✅ FIXED: Smart Parameter Filtering (Case Insensitive & Underscore Agnostic)

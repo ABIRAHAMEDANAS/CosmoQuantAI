@@ -859,10 +859,11 @@ const Backtester: React.FC = () => {
                         date: endDate,
                         profitPercent: res.profitPercent,
                         maxDrawdown: res.maxDrawdown,
-                        winRate: 0,
+                        winRate: res.winRate || 0,
                         sharpeRatio: res.sharpeRatio,
                         profit_percent: res.profitPercent,
-                        params: res.params
+                        params: res.params,
+                        total_trades: res.total_trades || 0
                     }));
 
                     if (isMultiObjectiveEnabled) setMultiObjectiveResults(formattedResults);
