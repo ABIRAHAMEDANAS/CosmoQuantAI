@@ -1,20 +1,22 @@
 import apiClient from './client';
 
-// রেজিস্ট্রেশন যেমন ছিল তেমনই থাকবে (JSON)
+// রেজিস্ট্রেশন (পাথ আপডেট করা হয়েছে)
 export const registerUser = async (userData: any) => {
-  const response = await apiClient.post('/register', userData);
+  // আগে ছিল: '/register'
+  // এখন হবে: '/v1/auth/register'
+  const response = await apiClient.post('/v1/auth/register', userData);
   return response.data;
 };
 
-// লগইন আপডেট করুন (Form Data ফরম্যাটে)
-// লগইন ফাংশন (আপডেট করা হয়েছে)
+// লগইন (পাথ আপডেট করা হয়েছে)
 export const loginUser = async (credentials: any) => {
-  // ব্যাকএন্ড এখন Form Data আশা করে (OAuth2 Standard)
   const formData = new URLSearchParams();
-  formData.append('username', credentials.email); // ব্যাকএন্ড 'username' ফিল্ড খুঁজবে
+  formData.append('username', credentials.email);
   formData.append('password', credentials.password);
 
-  const response = await apiClient.post('/login', formData, {
+  // আগে ছিল: '/login'
+  // এখন হবে: '/v1/auth/login'
+  const response = await apiClient.post('/v1/auth/login', formData, {
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded'
     }
@@ -22,24 +24,29 @@ export const loginUser = async (credentials: any) => {
   return response.data;
 };
 
-// বর্তমান ইউজারের তথ্য আনার জন্য
+// বর্তমান ইউজার (পাথ আপডেট করা হয়েছে)
 export const fetchCurrentUser = async () => {
-  const response = await apiClient.get('/users/me');
+  // আগে ছিল: '/users/me'
+  // এখন হবে: '/v1/users/me'
+  const response = await apiClient.get('/v1/users/me');
   return response.data;
 };
 
-// ১. পাসওয়ার্ড রিসেট ইমেইল পাঠানো
+// পাসওয়ার্ড রিসেট ইমেইল (পাথ আপডেট করা হয়েছে)
 export const sendForgotPasswordRequest = async (email: string) => {
-  const response = await apiClient.post('/forgot-password', { email });
+  // আগে ছিল: '/forgot-password'
+  // এখন হবে: '/v1/auth/forgot-password'
+  const response = await apiClient.post('/v1/auth/forgot-password', { email });
   return response.data;
 };
 
-// ২. নতুন পাসওয়ার্ড সেট করা
+// নতুন পাসওয়ার্ড সেট করা (পাথ আপডেট করা হয়েছে)
 export const resetUserPassword = async (token: string, newPassword: string) => {
-  const response = await apiClient.post('/reset-password', {
+  // আগে ছিল: '/reset-password'
+  // এখন হবে: '/v1/auth/reset-password'
+  const response = await apiClient.post('/v1/auth/reset-password', {
     token,
     new_password: newPassword
   });
   return response.data;
 };
-
