@@ -3,7 +3,8 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import Button from '@/components/common/Button';
 import Card from '@/components/common/Card';
-import { MOCK_ACTIVE_BOTS, MOCK_BACKTEST_RESULTS, MOCK_STRATEGIES, REGIME_DEFINITIONS, RegimeIcon, MOCK_CUSTOM_MODELS, MLModelIcon, EQUITY_CURVE_DATA } from '@/constants';
+import { botService } from '@/services/botService';
+import { MOCK_BACKTEST_RESULTS, MOCK_STRATEGIES, REGIME_DEFINITIONS, RegimeIcon, MOCK_CUSTOM_MODELS, MLModelIcon, EQUITY_CURVE_DATA } from '@/constants';
 import type { MarketRegime, CustomMLModel, ActiveBot, BacktestResult } from '@/types';
 import { ResponsiveContainer, LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceDot, Cell } from 'recharts';
 import { useTheme } from '@/context/ThemeContext';
@@ -730,8 +731,35 @@ const CreateBotModal: React.FC<{
 const BotLab: React.FC = () => {
     const [isCreating, setIsCreating] = useState(false);
     const [isVisualBuilderOpen, setIsVisualBuilderOpen] = useState(false);
-    const [bots, setBots] = useState<ActiveBot[]>(MOCK_ACTIVE_BOTS);
+    const [bots, setBots] = useState<ActiveBot[]>([]);
     const { showToast } = useToast();
+
+    // ✅ ১. পেজ লোড হলে ব্যাকএন্ড থেকে বট লোড করা
+    useEffect(() => {
+        loadBots();
+    }, []);
+
+    const loadBots = async () => {
+        try {
+            const data = await botService.getAllBots();
+            setBots(data);
+        } catch (error) {
+            console.error("Failed to load bots:", error);
+            // showToast("Failed to load bots", "error"); // Optional: Might be too noisy on polling
+        }
+    };
+
+    // ✅ ৩. লাইভ আপডেটের জন্য পোলিং (Simple Solution)
+    useEffect(() => {
+        const interval = setInterval(() => {
+            // শুধু যদি কোনো বট অ্যাক্টিভ থাকে তবেই রিকোয়েস্ট পাঠাবে
+            if (bots.some(b => b.status === 'active')) {
+                loadBots();
+            }
+        }, 5000); // ৫ সেকেন্ড পর পর আপডেট
+
+        return () => clearInterval(interval);
+    }, [bots]);
 
     const [isBacktestModalOpen, setIsBacktestModalOpen] = useState(false);
     const [selectedBot, setSelectedBot] = useState<ActiveBot | null>(null);
@@ -757,9 +785,34 @@ const BotLab: React.FC = () => {
         }, 1500);
     };
 
-    const handleCreateBot = (newBot: ActiveBot) => {
-        setBots(prev => [newBot, ...prev]);
-        showToast(`Bot "${newBot.name}" launched successfully!`, 'success');
+    // ✅ ২. নতুন বট তৈরি হ্যান্ডলার আপডেট
+    const handleCreateBot = async (newBotData: any) => {
+        try {
+            // We need to adapt the incoming `newBotData` (which is fully formed from the modal) 
+            // to the API expectation if necessary, or just pass it if the modal constructs it correctly.
+            // The modal constructs a full `ActiveBot` object locally.
+            // Let's assume the API accepts mostly what the modal produces, but the service `createBot`
+            // takes `botData`.
+
+            // The Modal currently passes a full object with ID generated. 
+            // We should probably rely on backend for ID, but for now let's pass the relevant fields.
+            const payload = {
+                name: newBotData.name,
+                market: newBotData.market,
+                strategy: newBotData.strategy,
+                status: 'active', // Defaulting to active as per previous logic? Or maybe 'inactive'
+                // Add other fields as per schema if needed
+                staticStopLoss: newBotData.staticStopLoss,
+                isRegimeAware: newBotData.isRegimeAware
+            };
+
+            const createdBot = await botService.createBot(payload);
+            setBots(prev => [createdBot, ...prev]);
+            showToast(`Bot "${createdBot.name}" launched successfully!`, 'success');
+        } catch (error) {
+            console.error(error);
+            showToast("Failed to create bot", "error");
+        }
     };
 
     const handleSaveVisualStrategy = (name: string) => {
@@ -773,20 +826,38 @@ const BotLab: React.FC = () => {
             status: 'active',
             isRegimeAware: true,
         };
-        setBots(prev => [newBot, ...prev]);
-        setIsVisualBuilderOpen(false);
-        showToast(`Visual Strategy "${name}" deployed!`, 'success');
+        // For visual strategy, we might need a special API endpoint or just use createBot
+        // For now, let's just use createBot generally or keep local for visual builder if no backend support yet/
+        // Assuming we want to persist it:
+        botService.createBot(newBot)
+            .then(created => {
+                setBots(prev => [created, ...prev]);
+                setIsVisualBuilderOpen(false);
+                showToast(`Visual Strategy "${name}" deployed!`, 'success');
+            })
+            .catch(() => showToast("Failed to deploy visual strategy", "error"));
     };
 
-    const handleToggleStatus = (id: string) => {
-        setBots(prev => prev.map(bot => {
-            if (bot.id === id) {
-                const newStatus = bot.status === 'active' ? 'inactive' : 'active';
-                showToast(`${bot.name} is now ${newStatus}.`, newStatus === 'active' ? 'success' : 'info');
-                return { ...bot, status: newStatus };
-            }
-            return bot;
-        }));
+    // ✅ ৩. স্ট্যাটাস টগল (Start/Stop) হ্যান্ডলার আপডেট
+    const handleToggleStatus = async (id: string) => {
+        const bot = bots.find(b => b.id === id);
+        if (!bot) return;
+
+        const action = bot.status === 'active' ? 'stop' : 'start';
+
+        try {
+            // অপটিমিস্টিক আপডেট (UI আগে আপডেট হবে)
+            setBots(prev => prev.map(b => b.id === id ? { ...b, status: action === 'start' ? 'active' : 'inactive' } : b));
+
+            // API কল
+            await botService.controlBot(id, action);
+
+            showToast(`${bot.name} is now ${action === 'start' ? 'Running' : 'Stopped'}.`, 'success');
+        } catch (error) {
+            // এরর হলে আগের অবস্থায় ফেরত নেওয়া
+            loadBots();
+            showToast(`Failed to ${action} bot`, "error");
+        }
     };
 
     return (

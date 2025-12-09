@@ -6,6 +6,8 @@ import math
 import time
 from . import utils 
 from app.strategies import STRATEGY_MAP
+from app.services.live_engine import LiveBotEngine
+import asyncio
 
 # ✅ নতুন হেল্পার ফাংশন: NaN চেক করার জন্য
 def clean_metric(value):
@@ -245,6 +247,44 @@ def run_batch_backtest_task(self, symbol: str, timeframe: str, initial_cash: flo
         "results": results,
         "errors": errors
     }
+
+# ✅ নতুন লাইভ বট টাস্ক
+@celery_app.task(bind=True)
+def run_live_bot_task(self, bot_id: int):
+    """
+    এই টাস্কটি একটি নির্দিষ্ট বটের জন্য লাইভ ট্রেডিং লুপ চালাবে।
+    """
+    db = SessionLocal()
+    try:
+        # ১. ডাটাবেস থেকে বট লোড করা
+        from app.models import Bot
+        bot = db.query(Bot).filter(Bot.id == bot_id).first()
+        
+        if not bot:
+            print(f"❌ Bot {bot_id} not found in DB")
+            return "Bot not found"
+
+        # ২. Redis এ ফ্ল্যাগ সেট করা (যাতে পরে স্টপ করা যায়)
+        r = utils.get_redis_client()
+        task_key = f"bot_task:{bot_id}"
+        r.set(task_key, "running")
+
+        # ৩. ইঞ্জিন চালু করা (Async loop চালানোর জন্য wrapper)
+        engine = LiveBotEngine(bot, db)
+        
+        # Celery এর ভেতরে Asyncio রান করা
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(engine.run_loop())
+        loop.close()
+
+    except Exception as e:
+        print(f"❌ Critical Bot Error: {e}")
+    finally:
+        db.close()
+        # টাস্ক শেষ হলে Redis key মুছে ফেলা
+        r = utils.get_redis_client()
+        r.delete(f"bot_task:{bot_id}")
 
 import ccxt
 import os

@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 from app import models, schemas
 from app.api import deps
 from app.db.session import SessionLocal 
+from app.tasks import run_live_bot_task
+from app import utils
 
 router = APIRouter()
 
@@ -88,26 +90,35 @@ def control_bot(
     *,
     db: Session = Depends(deps.get_db),
     bot_id: int,
-    action: str, # "start", "stop", "pause"
+    action: str, # "start", "stop"
     current_user: models.User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    Start or Stop a bot instance.
+    Start or Stop a bot instance using Celery & Redis.
     """
     bot = db.query(models.Bot).filter(models.Bot.id == bot_id, models.Bot.owner_id == current_user.id).first()
     if not bot:
         raise HTTPException(status_code=404, detail="Bot not found")
     
+    r = utils.get_redis_client()
+    task_key = f"bot_task:{bot_id}"
+
     if action == "start":
+        if bot.status == "active":
+            raise HTTPException(status_code=400, detail="Bot is already running")
+            
         bot.status = "active"
-        # Implements future Celery Task call
+        db.commit()
+        
+        # ✅ Celery টাস্ক ব্যাকগ্রাউন্ডে স্টার্ট করা হচ্ছে
+        run_live_bot_task.delay(bot_id=bot.id)
+        
     elif action == "stop":
         bot.status = "inactive"
-        # Stop logic here
-    elif action == "pause":
-        bot.status = "paused"
-    
-    db.add(bot)
-    db.commit()
+        db.commit()
+        
+        # ✅ Redis Key ডিলিট করে লুপ থামানো হচ্ছে
+        r.delete(task_key)
+        
     db.refresh(bot)
     return bot
