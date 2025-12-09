@@ -5,20 +5,25 @@ from datetime import datetime
 # Shared properties
 class BotBase(BaseModel):
     name: Optional[str] = None
+    exchange: Optional[str] = None
     market: Optional[str] = None
     strategy: Optional[str] = None
     timeframe: Optional[str] = None
-    initial_capital: Optional[float] = 1000.0
+    trade_value: Optional[float] = 100.0
+    trade_unit: Optional[str] = "QUOTE"
+    api_key_id: Optional[str] = None
     config: Optional[Dict[str, Any]] = {}
     is_regime_aware: Optional[bool] = False
 
 # Properties to receive on Bot creation
 class BotCreate(BotBase):
     name: str
+    exchange: str
     market: str
     strategy: str
+    timeframe: str
 
-# Properties to receive on Bot update
+# ✅ মিসিং অংশ: BotUpdate ক্লাসটি আবার যোগ করা হলো
 class BotUpdate(BotBase):
     status: Optional[str] = None
     pnl: Optional[float] = None

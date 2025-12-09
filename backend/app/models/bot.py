@@ -8,18 +8,24 @@ class Bot(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     owner_id = Column(Integer, ForeignKey("users.id"))
-    name = Column(String, index=True)
-    market = Column(String)  # e.g., "BTC/USDT"
-    strategy = Column(String) # e.g., "RSI Strategy"
-    timeframe = Column(String) # e.g., "1h"
     
+    name = Column(String, index=True)
+    exchange = Column(String) # ✅ নতুন: যেমন 'binance'
+    market = Column(String)   # যেমন 'BTC/USDT'
+    strategy = Column(String) # যেমন 'RSI Crossover'
+    timeframe = Column(String) # যেমন '1h'
+    
+    # ✅ নতুন ট্রেডিং কনফিগারেশন
+    trade_value = Column(Float, default=100.0) # কত টাকার ট্রেড হবে
+    trade_unit = Column(String, default="QUOTE") # 'QUOTE' (USDT) বা 'ASSET' (BTC)
+    api_key_id = Column(String, nullable=True) # কোন API Key ব্যবহার হবে (Exchange Name বা ID)
+
     # Configuration & State
-    status = Column(String, default="inactive") # active, inactive, paused
+    status = Column(String, default="inactive") # active, inactive
     pnl = Column(Float, default=0.0)
     pnl_percent = Column(Float, default=0.0)
-    initial_capital = Column(Float, default=1000.0)
     
-    # Strategy Parameters (JSON format)
+    # Strategy Parameters & Risk Management (JSON এ সেভ থাকবে)
     config = Column(JSON, default={})
     
     is_regime_aware = Column(Boolean, default=False)

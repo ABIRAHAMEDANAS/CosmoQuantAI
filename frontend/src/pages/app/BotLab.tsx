@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import Button from '@/components/common/Button';
 import Card from '@/components/common/Card';
 import { botService } from '@/services/botService';
+import { marketDataService } from '@/services/marketData';
 import { MOCK_BACKTEST_RESULTS, MOCK_STRATEGIES, REGIME_DEFINITIONS, RegimeIcon, MOCK_CUSTOM_MODELS, MLModelIcon, EQUITY_CURVE_DATA } from '@/constants';
 import type { MarketRegime, CustomMLModel, ActiveBot, BacktestResult } from '@/types';
 import { ResponsiveContainer, LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceDot, Cell } from 'recharts';
@@ -477,14 +478,21 @@ const CreateBotModal: React.FC<{
     const [tradeValue, setTradeValue] = useState('100');
     const [unit, setUnit] = useState('QUOTE');
     const [apiKeyId, setApiKeyId] = useState('');
-    const [exchange, setExchange] = useState('Binance');
-    const [assetPair, setAssetPair] = useState('BTC/USDT');
+
+    // ✅ ডাইনামিক এক্সচেঞ্জ এবং পেয়ার স্টেট
+    const [exchange, setExchange] = useState('');
+    const [assetPair, setAssetPair] = useState('');
+    const [availableExchanges, setAvailableExchanges] = useState<string[]>([]);
+    const [availablePairs, setAvailablePairs] = useState<string[]>([]);
+    const [isLoadingExchanges, setIsLoadingExchanges] = useState(false);
+    const [isLoadingPairs, setIsLoadingPairs] = useState(false);
+
     const [strategy, setStrategy] = useState(MOCK_STRATEGIES[0]);
     const [timeframe, setTimeframe] = useState('1h');
     const [deploymentTarget, setDeploymentTarget] = useState<'Spot' | 'Futures' | 'Margin'>('Spot');
     const [orderType, setOrderType] = useState<'Market' | 'Limit'>('Market');
 
-    // Strategy Params (Mock)
+    // Strategy Params
     const [strategyParams, setStrategyParams] = useState({
         bbLength: 20,
         bbStd: 2,
@@ -512,22 +520,79 @@ const CreateBotModal: React.FC<{
     // Populate API Keys
     const availableApiKeys = useMemo(() => Object.keys(apiKeys).filter(k => apiKeys[k].isEnabled), [apiKeys]);
 
+    // ✅ ১. এক্সচেঞ্জ লিস্ট লোড করা
+    useEffect(() => {
+        const fetchExchanges = async () => {
+            setIsLoadingExchanges(true);
+            try {
+                const exList = await marketDataService.getAllExchanges();
+                // শুধু জনপ্রিয় কিছু এক্সচেঞ্জ প্রথমে দেখানোর জন্য সর্ট করা যেতে পারে
+                // অথবা সরাসরি সব সেট করে দিন
+                setAvailableExchanges(exList);
+            } catch (error) {
+                console.error("Failed to load exchanges", error);
+                showToast('Failed to load exchange list', 'error');
+            } finally {
+                setIsLoadingExchanges(false);
+            }
+        };
+        fetchExchanges();
+    }, []);
+
+    // ✅ ২. পেয়ার লোড করা (যখন এক্সচেঞ্জ সিলেক্ট হবে)
+    useEffect(() => {
+        if (exchange) {
+            const fetchPairs = async () => {
+                setIsLoadingPairs(true);
+                setAvailablePairs([]); // ক্লিয়ার আগের ডাটা
+                try {
+                    const pairs = await marketDataService.getExchangePairs(exchange);
+                    setAvailablePairs(pairs);
+                    if (pairs.length > 0) setAssetPair(pairs[0]); // প্রথমটি অটো সিলেক্ট
+                } catch (error) {
+                    console.error("Failed to load pairs", error);
+                    showToast(`Failed to load pairs for ${exchange}`, 'error');
+                } finally {
+                    setIsLoadingPairs(false);
+                }
+            };
+            fetchPairs();
+        }
+    }, [exchange]);
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!botName.trim()) { showToast('Enter a name', 'error'); return; }
 
-        const newBot: ActiveBot = {
-            id: `bot_${Date.now()}`,
+        // ভ্যালিডেশন
+        if (!botName.trim()) { showToast('Enter a name', 'error'); return; }
+        if (!exchange) { showToast('Select an exchange', 'error'); return; }
+        if (!assetPair) { showToast('Select an asset pair', 'error'); return; }
+        if (!apiKeyId) { showToast('Select an API Key Configuration', 'warning'); }
+
+        // ✅ সব ডাটা দিয়ে অবজেক্ট তৈরি
+        const newBotData = {
             name: botName,
+            exchange: exchange,
             market: assetPair,
             strategy: strategy,
-            pnl: 0,
-            pnlPercent: 0,
-            status: 'active',
-            isRegimeAware: advanced.regimeFilter,
-            staticStopLoss: riskParams.stopLoss
+            timeframe: timeframe,
+            trade_value: Number(tradeValue),
+            trade_unit: unit,
+            api_key_id: apiKeyId, // এখানে এক্সচেঞ্জের নাম বা ID যাচ্ছে
+            is_regime_aware: advanced.regimeFilter,
+            config: {
+                // সব অ্যাডভান্সড সেটিংস এখানে JSON হিসেবে যাবে
+                strategyParams,
+                riskParams,
+                advanced,
+                notifications,
+                deploymentTarget,
+                orderType
+            }
         };
-        onCreateBot(newBot);
+
+        // API কল করার জন্য প্যারেন্ট ফাংশনে পাঠানো
+        onCreateBot(newBotData as any);
         onClose();
     };
 
@@ -583,18 +648,40 @@ const CreateBotModal: React.FC<{
                                     {availableApiKeys.map(key => <option key={key} value={key}>{key}</option>)}
                                 </select>
                             </div>
+
+                            {/* ✅ Exchange Selection (Dynamic) */}
                             <div className="md:col-span-1">
-                                <label className={labelClasses}>Market / Exchange</label>
+                                <label className={labelClasses}>
+                                    Market / Exchange
+                                    {isLoadingExchanges && <span className="ml-2 text-[10px] text-brand-primary animate-pulse">Loading...</span>}
+                                </label>
                                 <select className={inputClasses} value={exchange} onChange={e => setExchange(e.target.value)}>
-                                    <option>Binance</option>
-                                    <option>KuCoin</option>
-                                    <option>Kraken</option>
+                                    <option value="" disabled>Select Exchange</option>
+                                    {availableExchanges.map(ex => (
+                                        <option key={ex} value={ex}>{ex.toUpperCase()}</option>
+                                    ))}
                                 </select>
                             </div>
-                            <div className="md:col-span-3">
-                                <label className={labelClasses}>Asset Pair</label>
-                                <select className={inputClasses} value={assetPair} onChange={e => setAssetPair(e.target.value)}>
-                                    {['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'ADA/USDT'].map(s => <option key={s} value={s}>{s}</option>)}
+
+                            {/* ✅ Asset Pair Selection (Dynamic) */}
+                            <div className="md:col-span-1">
+                                <label className={labelClasses}>
+                                    Asset Pair
+                                    {isLoadingPairs && <span className="ml-2 text-[10px] text-brand-primary animate-pulse">Fetching...</span>}
+                                </label>
+                                <select
+                                    className={inputClasses}
+                                    value={assetPair}
+                                    onChange={e => setAssetPair(e.target.value)}
+                                    disabled={!exchange || isLoadingPairs}
+                                >
+                                    {!exchange ? (
+                                        <option>Select Exchange First</option>
+                                    ) : isLoadingPairs ? (
+                                        <option>Loading Pairs...</option>
+                                    ) : (
+                                        availablePairs.map(s => <option key={s} value={s}>{s}</option>)
+                                    )}
                                 </select>
                             </div>
 
@@ -604,7 +691,7 @@ const CreateBotModal: React.FC<{
                                     {MOCK_STRATEGIES.map(s => <option key={s} value={s}>{s}</option>)}
                                 </select>
                             </div>
-                            <div className="md:col-span-1">
+                            <div className="md:col-span-2">
                                 <label className={labelClasses}>Timeframe</label>
                                 <select className={inputClasses} value={timeframe} onChange={e => setTimeframe(e.target.value)}>
                                     {['1s', '5s', '10s', '15s', '30s', '45s', '1m', '3m', '5m', '15m', '30m', '45m', '1h', '2h', '3h', '4h', '6h', '8h', '12h', '1d', '3d', '1w', '1M'].map(t => <option key={t} value={t}>{t}</option>)}
@@ -612,6 +699,7 @@ const CreateBotModal: React.FC<{
                             </div>
                         </div>
 
+                        {/* Deployment Target & Order Type */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
                             <div>
                                 <label className={labelClasses}>Deployment Target</label>
@@ -817,27 +905,11 @@ const BotLab: React.FC = () => {
     };
 
     // ✅ ২. নতুন বট তৈরি হ্যান্ডলার আপডেট
+    // ✅ ২. নতুন বট তৈরি হ্যান্ডলার আপডেট
     const handleCreateBot = async (newBotData: any) => {
         try {
-            // We need to adapt the incoming `newBotData` (which is fully formed from the modal) 
-            // to the API expectation if necessary, or just pass it if the modal constructs it correctly.
-            // The modal constructs a full `ActiveBot` object locally.
-            // Let's assume the API accepts mostly what the modal produces, but the service `createBot`
-            // takes `botData`.
-
-            // The Modal currently passes a full object with ID generated. 
-            // We should probably rely on backend for ID, but for now let's pass the relevant fields.
-            const payload = {
-                name: newBotData.name,
-                market: newBotData.market,
-                strategy: newBotData.strategy,
-                status: 'active', // Defaulting to active as per previous logic? Or maybe 'inactive'
-                // Add other fields as per schema if needed
-                staticStopLoss: newBotData.staticStopLoss,
-                isRegimeAware: newBotData.isRegimeAware
-            };
-
-            const createdBot = await botService.createBot(payload);
+            // সার্ভিস কল
+            const createdBot = await botService.createBot(newBotData);
             setBots(prev => [createdBot, ...prev]);
             showToast(`Bot "${createdBot.name}" launched successfully!`, 'success');
         } catch (error) {

@@ -30,8 +30,13 @@ export interface Asset {
 export interface ActiveBot {
   id: string;
   name: string;
+  exchange?: string; // ✅ নতুন
   market: string;
   strategy: string;
+  timeframe?: string; // ✅ নতুন
+  tradeValue?: number; // ✅ নতুন
+  tradeUnit?: string; // ✅ নতুন
+  apiKeyId?: string; // ✅ নতুন
   pnl: number;
   pnlPercent: number;
   status: 'active' | 'inactive';
@@ -40,6 +45,7 @@ export interface ActiveBot {
   customModelId?: string;
   sentimentScore?: number;
   staticStopLoss?: number;
+  config?: any; // সব এক্সট্রা প্যারামিটারের জন্য
 }
 
 export interface BacktestMetrics {
