@@ -49,6 +49,12 @@ const PlusIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
     </svg>
 );
 
+const TrashIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+);
+
 // Animated Number Component
 const AnimatedNumber: React.FC<{ value: number; decimals?: number; prefix?: string; suffix?: string }> = ({ value, decimals = 2, prefix = '', suffix = '' }) => {
     const [displayValue, setDisplayValue] = useState(0);
@@ -132,7 +138,8 @@ const BotCard: React.FC<{
     index: number;
     onRunBacktest: (bot: ActiveBot) => void;
     onToggleStatus: (id: string) => void;
-}> = ({ bot, index, onRunBacktest, onToggleStatus }) => {
+    onDelete: (id: string) => void;
+}> = ({ bot, index, onRunBacktest, onToggleStatus, onDelete }) => {
     const isPositive = bot.pnl >= 0;
     const statusColor = bot.status === 'active' ? 'bg-brand-success' : 'bg-gray-400';
     const statusGlow = bot.status === 'active' ? 'shadow-[0_0_10px_rgba(16,185,129,0.5)]' : '';
@@ -192,6 +199,15 @@ const BotCard: React.FC<{
                         <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-brand-darkest text-gray-500 dark:text-gray-400 transition-colors" title="Settings">
                             <SettingsIcon />
                         </button>
+
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onDelete(bot.id); }}
+                            className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-gray-500 hover:text-red-500 dark:text-gray-400 dark:hover:text-red-400 transition-colors"
+                            title="Delete Bot"
+                        >
+                            <TrashIcon />
+                        </button>
+
                         <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-brand-darkest text-gray-500 dark:text-gray-400 transition-colors" title="Analytics">
                             <ChartIcon />
                         </button>
@@ -785,6 +801,21 @@ const BotLab: React.FC = () => {
         }, 1500);
     };
 
+    const handleDeleteBot = async (id: string) => {
+        if (!window.confirm("Are you sure you want to delete this bot? This action cannot be undone.")) {
+            return;
+        }
+
+        try {
+            await botService.deleteBot(id);
+            setBots(prev => prev.filter(b => b.id !== id));
+            showToast("Bot deleted successfully", "success");
+        } catch (error) {
+            console.error("Failed to delete bot:", error);
+            showToast("Failed to delete bot", "error");
+        }
+    };
+
     // ✅ ২. নতুন বট তৈরি হ্যান্ডলার আপডেট
     const handleCreateBot = async (newBotData: any) => {
         try {
@@ -898,6 +929,7 @@ const BotLab: React.FC = () => {
                         index={index}
                         onRunBacktest={handleRunBacktest}
                         onToggleStatus={handleToggleStatus}
+                        onDelete={handleDeleteBot}
                     />
                 ))}
 
