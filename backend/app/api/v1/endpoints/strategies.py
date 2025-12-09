@@ -9,6 +9,7 @@ from app.api import deps
 from app.constants import STANDARD_STRATEGY_PARAMS
 from app.services import ai_service
 from app.strategy_parser import parse_strategy_params
+from app.strategies import STRATEGY_MAP
 
 router = APIRouter()
 
@@ -38,13 +39,33 @@ def get_standard_strategy_params():
     return STANDARD_STRATEGY_PARAMS
 
 @router.get("/list")
-def get_custom_strategies(current_user: models.User = Depends(deps.get_current_user)):
+def get_all_strategies(current_user: models.User = Depends(deps.get_current_user)):
+    """
+    Returns a clean combined list of Standard Strategies and Custom Uploaded Strategies without duplicates.
+    """
     try:
-        if not os.path.exists(UPLOAD_DIR):
-            return []
-        files = os.listdir(UPLOAD_DIR)
-        strategies = [f[:-3] for f in files if f.endswith(".py")]
-        return strategies
+        # ১. স্ট্যান্ডার্ড স্ট্র্যাটেজিগুলোর নাম ফিক্সড রাখা হলো (Clean & Safe)
+        # এটি STRATEGY_MAP থেকে সেই নামগুলো বাদ দেবে যেগুলো কাস্টম লোডেড (যেমন: "Name (Class)")
+        standard_strategies = [
+            "SMA Crossover", 
+            "RSI Crossover", 
+            "MACD Crossover", 
+            "EMA Crossover", 
+            "Bollinger Bands"
+        ]
+
+        # ২. কাস্টম ফোল্ডার থেকে ফাইলগুলোর নাম নেওয়া
+        custom_strategies = []
+        if os.path.exists(UPLOAD_DIR):
+            files = os.listdir(UPLOAD_DIR)
+            custom_strategies = [f[:-3] for f in files if f.endswith(".py")]
+
+        # ৩. দুটি লিস্ট যোগ করে সর্ট করা (Duplicates are naturally avoided by separation)
+        # set() ব্যবহার করা হলো যাতে কোনো কারণে স্ট্যান্ডার্ড নাম ফাইলের নামের সাথে মিলে গেলে ডুপ্লিকেট না হয়
+        combined_strategies = sorted(list(set(standard_strategies + custom_strategies)))
+
+        return combined_strategies
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -54,8 +75,14 @@ def get_strategy_source(strategy_name: str, current_user: models.User = Depends(
         filename = f"{strategy_name}.py" if not strategy_name.endswith(".py") else strategy_name
         file_path = f"{UPLOAD_DIR}/{filename}"
         
+        # If file not found, check if it is a standard strategy
         if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="Strategy file not found")
+             if strategy_name in STRATEGY_MAP:
+                 return {
+                     "code": "# This is a built-in standard strategy.\n# Source code is part of the system core.",
+                     "inferred_params": {} 
+                 }
+             raise HTTPException(status_code=404, detail="Strategy file not found")
             
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             code = f.read()

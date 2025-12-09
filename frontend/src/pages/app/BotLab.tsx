@@ -10,7 +10,9 @@ import { useToast } from '@/context/ToastContext';
 import { useSettings } from '@/context/SettingsContext';
 import { marketDataService } from '@/services/marketData';
 import { botService } from '@/services/botService';
-import SearchableSelect from '@/components/common/SearchableSelect'; // ✅ নতুন ইম্পোর্ট
+import SearchableSelect from '@/components/common/SearchableSelect';
+import { strategyService } from '@/services/strategyService';
+import client from '@/services/client';
 
 // Icons
 const PlayIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
@@ -483,7 +485,10 @@ const CreateBotModal: React.FC<{
     const [isLoadingExchanges, setIsLoadingExchanges] = useState(false);
     const [isLoadingPairs, setIsLoadingPairs] = useState(false);
 
-    const [strategy, setStrategy] = useState(MOCK_STRATEGIES[0]);
+    // ✅ নতুন: স্ট্র্যাটেজি লোড করার স্টেট
+    const [strategies, setStrategies] = useState<string[]>([]);
+    const [strategy, setStrategy] = useState(''); // শুরুতে খালি থাকবে
+    const [isLoadingStrategies, setIsLoadingStrategies] = useState(false);
     const [timeframe, setTimeframe] = useState('1h');
     const [deploymentTarget, setDeploymentTarget] = useState<'Spot' | 'Futures' | 'Margin'>('Spot');
     const [orderType, setOrderType] = useState<'Market' | 'Limit'>('Market');
@@ -531,6 +536,28 @@ const CreateBotModal: React.FC<{
             }
         };
         fetchExchanges();
+    }, []);
+
+    // ✅ ৩. স্ট্র্যাটেজি লিস্ট ফেচ করা
+    useEffect(() => {
+        const fetchStrategies = async () => {
+            setIsLoadingStrategies(true);
+            try {
+                // সরাসরি API এন্ডপয়েন্ট কল (অথবা botService এ মেথড বানিয়েও করা যায়)
+                const { data } = await client.get('/v1/strategies/list'); // Client base URL is already /api
+                setStrategies(data);
+                if (data.length > 0) setStrategy(data[0]); // প্রথমটি ডিফল্ট হিসেবে সেট
+            } catch (error) {
+                console.error("Failed to load strategies", error);
+                showToast('Failed to load strategies', 'error');
+                // ফলব্যাক হিসেবে মক ডাটা ব্যবহার করা যেতে পারে
+                setStrategies(MOCK_STRATEGIES);
+                setStrategy(MOCK_STRATEGIES[0]);
+            } finally {
+                setIsLoadingStrategies(false);
+            }
+        };
+        fetchStrategies();
     }, []);
 
     // ✅ ২. পেয়ার লোড করা (যখন এক্সচেঞ্জ সিলেক্ট হবে)
@@ -665,10 +692,18 @@ const CreateBotModal: React.FC<{
                                 />
                             </div>
 
+                            {/* Strategy Select Box Updated */}
                             <div className="md:col-span-1">
-                                <label className={labelClasses}>Strategy</label>
-                                <select className={inputClasses} value={strategy} onChange={e => setStrategy(e.target.value)}>
-                                    {MOCK_STRATEGIES.map(s => <option key={s} value={s}>{s}</option>)}
+                                <label className={labelClasses}>
+                                    Strategy {isLoadingStrategies && <span className="text-xs text-brand-primary lowercase ml-1">(syncing...)</span>}
+                                </label>
+                                <select
+                                    className={inputClasses}
+                                    value={strategy}
+                                    onChange={e => setStrategy(e.target.value)}
+                                    disabled={isLoadingStrategies}
+                                >
+                                    {strategies.map(s => <option key={s} value={s}>{s}</option>)}
                                 </select>
                             </div>
                             <div className="md:col-span-2">
