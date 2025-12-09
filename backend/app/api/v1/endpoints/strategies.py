@@ -16,6 +16,37 @@ router = APIRouter()
 UPLOAD_DIR = "app/strategies/custom"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# ✅ হেল্পার ফাংশন: প্যারামিটার কনফিগারেশন জেনারেট করার জন্য
+def generate_param_config(key, default_val):
+    if not isinstance(default_val, (int, float)) or isinstance(default_val, bool):
+        # যদি নাম্বার না হয়, তবে সাধারণ টেক্সট বা বুলিয়ান হিসেবে রিটার্ন
+        return {
+            "type": "text" if not isinstance(default_val, bool) else "boolean",
+            "label": key.replace('_', ' ').title(),
+            "default": default_val
+        }
+
+    # নাম্বার হলে স্মার্ট রেঞ্জ জেনারেশন
+    is_int = isinstance(default_val, int)
+    min_val = 0 if default_val >= 0 else default_val * 2
+    
+    if default_val > 0:
+        min_val = 1 if is_int else 0.1
+    
+    max_val = default_val * 5 if default_val > 0 else 100
+    if max_val == 0: max_val = 100
+    
+    step = 1 if is_int else round(default_val / 10, 3) or 0.01
+
+    return {
+        "type": "number",
+        "label": key.replace('_', ' ').title(),
+        "default": default_val,
+        "min": min_val,
+        "max": max_val,
+        "step": step
+    }
+
 @router.post("/upload")
 async def upload_strategy(file: UploadFile = File(...), current_user: models.User = Depends(deps.get_current_user)):
     if not file.filename.endswith(".py"):
@@ -44,8 +75,7 @@ def get_all_strategies(current_user: models.User = Depends(deps.get_current_user
     Returns a clean combined list of Standard Strategies and Custom Uploaded Strategies without duplicates.
     """
     try:
-        # ১. স্ট্যান্ডার্ড স্ট্র্যাটেজিগুলোর নাম ফিক্সড রাখা হলো (Clean & Safe)
-        # এটি STRATEGY_MAP থেকে সেই নামগুলো বাদ দেবে যেগুলো কাস্টম লোডেড (যেমন: "Name (Class)")
+        # Standard strategies (Hardcoded names to keep list clean)
         standard_strategies = [
             "SMA Crossover", 
             "RSI Crossover", 
@@ -54,16 +84,14 @@ def get_all_strategies(current_user: models.User = Depends(deps.get_current_user
             "Bollinger Bands"
         ]
 
-        # ২. কাস্টম ফোল্ডার থেকে ফাইলগুলোর নাম নেওয়া
+        # Custom strategies from folder
         custom_strategies = []
         if os.path.exists(UPLOAD_DIR):
             files = os.listdir(UPLOAD_DIR)
             custom_strategies = [f[:-3] for f in files if f.endswith(".py")]
 
-        # ৩. দুটি লিস্ট যোগ করে সর্ট করা (Duplicates are naturally avoided by separation)
-        # set() ব্যবহার করা হলো যাতে কোনো কারণে স্ট্যান্ডার্ড নাম ফাইলের নামের সাথে মিলে গেলে ডুপ্লিকেট না হয়
+        # Merge and remove duplicates
         combined_strategies = sorted(list(set(standard_strategies + custom_strategies)))
-
         return combined_strategies
 
     except Exception as e:
@@ -75,15 +103,38 @@ def get_strategy_source(strategy_name: str, current_user: models.User = Depends(
         filename = f"{strategy_name}.py" if not strategy_name.endswith(".py") else strategy_name
         file_path = f"{UPLOAD_DIR}/{filename}"
         
-        # If file not found, check if it is a standard strategy
+        # ১. যদি কাস্টম ফোল্ডারে ফাইল না থাকে, তবে চেক করি এটি স্ট্যান্ডার্ড স্ট্র্যাটেজি কি না
         if not os.path.exists(file_path):
              if strategy_name in STRATEGY_MAP:
+                 # ✅ ফিক্স: স্ট্যান্ডার্ড স্ট্র্যাটেজি থেকে প্যারামিটার বের করা
+                 strategy_class = STRATEGY_MAP[strategy_name]
+                 standard_params = {}
+
+                 # Backtrader এর params স্ট্রাকচার রিড করা
+                 if hasattr(strategy_class, 'params'):
+                     # _getpairs() বা সরাসরি ডিকশনারি থেকে ভ্যালু নেওয়া
+                     params_dict = {}
+                     if hasattr(strategy_class.params, '_getpairs'):
+                         params_dict = strategy_class.params._getpairs()
+                     elif isinstance(strategy_class.params, dict):
+                         params_dict = strategy_class.params
+                     elif isinstance(strategy_class.params, tuple):
+                         # Tuples convert to dict (e.g. (('period', 20),))
+                         params_dict = dict(strategy_class.params)
+                     
+                     for key, val in params_dict.items():
+                         # Alias বা অপ্রয়োজনীয় প্যারামিটার ফিল্টার করা (যেগুলোর ভ্যালু None)
+                         if val is not None:
+                             standard_params[key] = generate_param_config(key, val)
+
                  return {
-                     "code": "# This is a built-in standard strategy.\n# Source code is part of the system core.",
-                     "inferred_params": {} 
+                     "code": f"# Standard Strategy: {strategy_name}\n# This is a built-in strategy.",
+                     "inferred_params": standard_params
                  }
+             
              raise HTTPException(status_code=404, detail="Strategy file not found")
             
+        # ২. কাস্টম স্ট্র্যাটেজি ফাইল রিড করা
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             code = f.read()
 
@@ -91,25 +142,7 @@ def get_strategy_source(strategy_name: str, current_user: models.User = Depends(
         try:
             raw_params_dict = parse_strategy_params(file_path)
             for key, default_val in raw_params_dict.items():
-                if isinstance(default_val, (int, float)) and not isinstance(default_val, bool):
-                     is_int = isinstance(default_val, int)
-                     min_val = 0 if default_val >= 0 else default_val * 2
-                     if default_val > 0:
-                         min_val = 1 if is_int else 0.1
-                     
-                     max_val = default_val * 5 if default_val > 0 else 0
-                     if max_val == 0: max_val = 100
-                     
-                     step = 1 if is_int else round(default_val / 10, 3) or 0.01
-
-                     extracted_params[key] = {
-                         "type": "number",
-                         "label": key.replace('_', ' ').title(),
-                         "default": default_val,
-                         "min": min_val,
-                         "max": max_val,
-                         "step": step
-                     }
+                extracted_params[key] = generate_param_config(key, default_val)
         except Exception as e:
             print(f"Auto-param detection failed: {e}")
             pass

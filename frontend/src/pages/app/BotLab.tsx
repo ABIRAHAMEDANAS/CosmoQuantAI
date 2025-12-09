@@ -485,20 +485,19 @@ const CreateBotModal: React.FC<{
     const [isLoadingExchanges, setIsLoadingExchanges] = useState(false);
     const [isLoadingPairs, setIsLoadingPairs] = useState(false);
 
-    // ✅ নতুন: স্ট্র্যাটেজি লোড করার স্টেট
+    // ✅ Strategy & Parameter Management
     const [strategies, setStrategies] = useState<string[]>([]);
-    const [strategy, setStrategy] = useState(''); // শুরুতে খালি থাকবে
+    const [strategy, setStrategy] = useState('');
     const [isLoadingStrategies, setIsLoadingStrategies] = useState(false);
+
+    // 🔥 New: Dynamic Parameter State
+    const [dynamicParamsSchema, setDynamicParamsSchema] = useState<Record<string, any>>({});
+    const [paramValues, setParamValues] = useState<Record<string, any>>({});
+    const [isLoadingParams, setIsLoadingParams] = useState(false);
+
     const [timeframe, setTimeframe] = useState('1h');
     const [deploymentTarget, setDeploymentTarget] = useState<'Spot' | 'Futures' | 'Margin'>('Spot');
     const [orderType, setOrderType] = useState<'Market' | 'Limit'>('Market');
-
-    // Strategy Params
-    const [strategyParams, setStrategyParams] = useState({
-        bbLength: 20,
-        bbStd: 2,
-        lookback: 30
-    });
 
     // Risk Management
     const [riskParams, setRiskParams] = useState({
@@ -543,14 +542,14 @@ const CreateBotModal: React.FC<{
         const fetchStrategies = async () => {
             setIsLoadingStrategies(true);
             try {
-                // সরাসরি API এন্ডপয়েন্ট কল (অথবা botService এ মেথড বানিয়েও করা যায়)
-                const { data } = await client.get('/v1/strategies/list'); // Client base URL is already /api
+                // API call to get strategy list
+                const { data } = await client.get('/v1/strategies/list');
                 setStrategies(data);
-                if (data.length > 0) setStrategy(data[0]); // প্রথমটি ডিফল্ট হিসেবে সেট
+                if (data.length > 0) setStrategy(data[0]);
             } catch (error) {
                 console.error("Failed to load strategies", error);
                 showToast('Failed to load strategies', 'error');
-                // ফলব্যাক হিসেবে মক ডাটা ব্যবহার করা যেতে পারে
+                // Fallback mock data
                 setStrategies(MOCK_STRATEGIES);
                 setStrategy(MOCK_STRATEGIES[0]);
             } finally {
@@ -559,6 +558,41 @@ const CreateBotModal: React.FC<{
         };
         fetchStrategies();
     }, []);
+
+    // 🔥 New: Load strategy parameters when strategy changes
+    useEffect(() => {
+        if (!strategy) return;
+
+        const fetchStrategyParams = async () => {
+            setIsLoadingParams(true);
+            try {
+                const { data } = await client.get(`/v1/strategies/source/${strategy}`);
+
+                if (data.inferred_params && Object.keys(data.inferred_params).length > 0) {
+                    setDynamicParamsSchema(data.inferred_params);
+
+                    // Set default values for input fields
+                    const defaults: Record<string, any> = {};
+                    Object.entries(data.inferred_params).forEach(([key, config]: [string, any]) => {
+                        defaults[key] = config.default;
+                    });
+                    setParamValues(defaults);
+                } else {
+                    // If no params found
+                    setDynamicParamsSchema({});
+                    setParamValues({});
+                }
+            } catch (error) {
+                console.error("Failed to load strategy params", error);
+                setDynamicParamsSchema({});
+                setParamValues({});
+            } finally {
+                setIsLoadingParams(false);
+            }
+        };
+
+        fetchStrategyParams();
+    }, [strategy]);
 
     // ✅ ২. পেয়ার লোড করা (যখন এক্সচেঞ্জ সিলেক্ট হবে)
     useEffect(() => {
@@ -602,7 +636,7 @@ const CreateBotModal: React.FC<{
             api_key_id: apiKeyId,
             is_regime_aware: advanced.regimeFilter,
             config: {
-                strategyParams,
+                strategyParams: paramValues,
                 riskParams,
                 advanced,
                 notifications,
@@ -750,23 +784,35 @@ const CreateBotModal: React.FC<{
 
                         <div className="h-px bg-gray-200 dark:bg-brand-border-dark my-6"></div>
 
-                        {/* Section 2: Strategy Params */}
+                        {/* 🔥 Section 2: Dynamic Strategy Parameters */}
                         <div>
-                            <h3 className={sectionTitleClasses}>Strategy Parameters ({strategy})</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                <div>
-                                    <label className={labelClasses}>Bollinger Band Length</label>
-                                    <input type="number" className={inputClasses} value={strategyParams.bbLength} onChange={e => setStrategyParams({ ...strategyParams, bbLength: Number(e.target.value) })} />
+                            <h3 className={sectionTitleClasses}>
+                                Strategy Parameters ({strategy})
+                                {isLoadingParams && <span className="text-xs text-brand-primary font-normal ml-2 animate-pulse">Loading params...</span>}
+                            </h3>
+
+                            {Object.keys(dynamicParamsSchema).length > 0 ? (
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    {Object.entries(dynamicParamsSchema).map(([key, config]: [string, any]) => (
+                                        <div key={key}>
+                                            <label className={labelClasses} title={key}>{config.label || key}</label>
+                                            <input
+                                                type="number" // Currently handling all as number
+                                                className={inputClasses}
+                                                value={paramValues[key] ?? config.default}
+                                                onChange={e => setParamValues({ ...paramValues, [key]: Number(e.target.value) })}
+                                                step={config.step || "any"}
+                                                min={config.min}
+                                                max={config.max}
+                                            />
+                                        </div>
+                                    ))}
                                 </div>
-                                <div>
-                                    <label className={labelClasses}>BB Standard Deviation</label>
-                                    <input type="number" className={inputClasses} value={strategyParams.bbStd} onChange={e => setStrategyParams({ ...strategyParams, bbStd: Number(e.target.value) })} />
+                            ) : (
+                                <div className="p-4 bg-gray-100 dark:bg-brand-darkest/50 rounded-xl text-center text-gray-500 text-sm">
+                                    {isLoadingParams ? "Fetching parameters..." : "No configurable parameters detected for this strategy."}
                                 </div>
-                                <div>
-                                    <label className={labelClasses}>S/R Lookback Period</label>
-                                    <input type="number" className={inputClasses} value={strategyParams.lookback} onChange={e => setStrategyParams({ ...strategyParams, lookback: Number(e.target.value) })} />
-                                </div>
-                            </div>
+                            )}
                         </div>
 
                         <div className="h-px bg-gray-200 dark:bg-brand-border-dark my-6"></div>
