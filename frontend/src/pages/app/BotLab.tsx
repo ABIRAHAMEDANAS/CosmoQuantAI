@@ -1,16 +1,16 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import Button from '@/components/common/Button';
 import Card from '@/components/common/Card';
-import { botService } from '@/services/botService';
-import { marketDataService } from '@/services/marketData';
-import { MOCK_BACKTEST_RESULTS, MOCK_STRATEGIES, REGIME_DEFINITIONS, RegimeIcon, MOCK_CUSTOM_MODELS, MLModelIcon, EQUITY_CURVE_DATA } from '@/constants';
+import { MOCK_ACTIVE_BOTS, MOCK_BACKTEST_RESULTS, MOCK_STRATEGIES, REGIME_DEFINITIONS, RegimeIcon, MOCK_CUSTOM_MODELS, MLModelIcon, EQUITY_CURVE_DATA } from '@/constants';
 import type { MarketRegime, CustomMLModel, ActiveBot, BacktestResult } from '@/types';
 import { ResponsiveContainer, LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceDot, Cell } from 'recharts';
 import { useTheme } from '@/context/ThemeContext';
 import { useToast } from '@/context/ToastContext';
 import { useSettings } from '@/context/SettingsContext';
+import { marketDataService } from '@/services/marketData';
+import { botService } from '@/services/botService';
+import SearchableSelect from '@/components/common/SearchableSelect'; // ✅ নতুন ইম্পোর্ট
 
 // Icons
 const PlayIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
@@ -96,7 +96,6 @@ const AnimatedNumber: React.FC<{ value: number; decimals?: number; prefix?: stri
 };
 
 const MiniEquityChart: React.FC<{ isPositive: boolean; id: string }> = ({ isPositive, id }) => {
-    // Generate slightly different mock data for each bot to make it look alive
     const data = useMemo(() => {
         let val = 100;
         const volatility = isPositive ? 2 : 3;
@@ -201,16 +200,13 @@ const BotCard: React.FC<{
                             <SettingsIcon />
                         </button>
 
+                        {/* 🔴 DELETE BUTTON */}
                         <button
                             onClick={(e) => { e.stopPropagation(); onDelete(bot.id); }}
                             className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-gray-500 hover:text-red-500 dark:text-gray-400 dark:hover:text-red-400 transition-colors"
                             title="Delete Bot"
                         >
                             <TrashIcon />
-                        </button>
-
-                        <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-brand-darkest text-gray-500 dark:text-gray-400 transition-colors" title="Analytics">
-                            <ChartIcon />
                         </button>
                     </div>
 
@@ -234,7 +230,7 @@ const BotCard: React.FC<{
 const BotLabHeader: React.FC<{ bots: ActiveBot[], onOpenCreate: () => void }> = ({ bots, onOpenCreate }) => {
     const totalPnL = bots.reduce((acc, bot) => acc + bot.pnl, 0);
     const activeCount = bots.filter(b => b.status === 'active').length;
-    const winRate = 68.5; // Mock aggregate
+    const winRate = 68.5;
 
     return (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 staggered-fade-in">
@@ -526,8 +522,6 @@ const CreateBotModal: React.FC<{
             setIsLoadingExchanges(true);
             try {
                 const exList = await marketDataService.getAllExchanges();
-                // শুধু জনপ্রিয় কিছু এক্সচেঞ্জ প্রথমে দেখানোর জন্য সর্ট করা যেতে পারে
-                // অথবা সরাসরি সব সেট করে দিন
                 setAvailableExchanges(exList);
             } catch (error) {
                 console.error("Failed to load exchanges", error);
@@ -544,11 +538,11 @@ const CreateBotModal: React.FC<{
         if (exchange) {
             const fetchPairs = async () => {
                 setIsLoadingPairs(true);
-                setAvailablePairs([]); // ক্লিয়ার আগের ডাটা
+                setAvailablePairs([]);
                 try {
                     const pairs = await marketDataService.getExchangePairs(exchange);
                     setAvailablePairs(pairs);
-                    if (pairs.length > 0) setAssetPair(pairs[0]); // প্রথমটি অটো সিলেক্ট
+                    if (pairs.length > 0) setAssetPair(pairs[0]);
                 } catch (error) {
                     console.error("Failed to load pairs", error);
                     showToast(`Failed to load pairs for ${exchange}`, 'error');
@@ -567,7 +561,7 @@ const CreateBotModal: React.FC<{
         if (!botName.trim()) { showToast('Enter a name', 'error'); return; }
         if (!exchange) { showToast('Select an exchange', 'error'); return; }
         if (!assetPair) { showToast('Select an asset pair', 'error'); return; }
-        if (!apiKeyId) { showToast('Select an API Key Configuration', 'warning'); }
+        // if (!apiKeyId) { showToast('Select an API Key Configuration', 'warning'); } // অপশনাল হতে পারে
 
         // ✅ সব ডাটা দিয়ে অবজেক্ট তৈরি
         const newBotData = {
@@ -578,10 +572,9 @@ const CreateBotModal: React.FC<{
             timeframe: timeframe,
             trade_value: Number(tradeValue),
             trade_unit: unit,
-            api_key_id: apiKeyId, // এখানে এক্সচেঞ্জের নাম বা ID যাচ্ছে
+            api_key_id: apiKeyId,
             is_regime_aware: advanced.regimeFilter,
             config: {
-                // সব অ্যাডভান্সড সেটিংস এখানে JSON হিসেবে যাবে
                 strategyParams,
                 riskParams,
                 advanced,
@@ -591,7 +584,6 @@ const CreateBotModal: React.FC<{
             }
         };
 
-        // API কল করার জন্য প্যারেন্ট ফাংশনে পাঠানো
         onCreateBot(newBotData as any);
         onClose();
     };
@@ -649,40 +641,28 @@ const CreateBotModal: React.FC<{
                                 </select>
                             </div>
 
-                            {/* ✅ Exchange Selection (Dynamic) */}
+                            {/* ✅ Searchable Exchange Selection */}
                             <div className="md:col-span-1">
-                                <label className={labelClasses}>
-                                    Market / Exchange
-                                    {isLoadingExchanges && <span className="ml-2 text-[10px] text-brand-primary animate-pulse">Loading...</span>}
-                                </label>
-                                <select className={inputClasses} value={exchange} onChange={e => setExchange(e.target.value)}>
-                                    <option value="" disabled>Select Exchange</option>
-                                    {availableExchanges.map(ex => (
-                                        <option key={ex} value={ex}>{ex.toUpperCase()}</option>
-                                    ))}
-                                </select>
+                                <SearchableSelect
+                                    label={`Market / Exchange ${isLoadingExchanges ? '(Loading...)' : ''}`}
+                                    options={availableExchanges}
+                                    value={exchange}
+                                    onChange={setExchange}
+                                    placeholder="Select Exchange"
+                                    disabled={isLoadingExchanges}
+                                />
                             </div>
 
-                            {/* ✅ Asset Pair Selection (Dynamic) */}
+                            {/* ✅ Searchable Asset Pair Selection */}
                             <div className="md:col-span-1">
-                                <label className={labelClasses}>
-                                    Asset Pair
-                                    {isLoadingPairs && <span className="ml-2 text-[10px] text-brand-primary animate-pulse">Fetching...</span>}
-                                </label>
-                                <select
-                                    className={inputClasses}
+                                <SearchableSelect
+                                    label={`Asset Pair ${isLoadingPairs ? '(Fetching...)' : ''}`}
+                                    options={availablePairs}
                                     value={assetPair}
-                                    onChange={e => setAssetPair(e.target.value)}
+                                    onChange={setAssetPair}
+                                    placeholder={!exchange ? "Select Exchange First" : "Select Pair"}
                                     disabled={!exchange || isLoadingPairs}
-                                >
-                                    {!exchange ? (
-                                        <option>Select Exchange First</option>
-                                    ) : isLoadingPairs ? (
-                                        <option>Loading Pairs...</option>
-                                    ) : (
-                                        availablePairs.map(s => <option key={s} value={s}>{s}</option>)
-                                    )}
-                                </select>
+                                />
                             </div>
 
                             <div className="md:col-span-1">
@@ -838,6 +818,10 @@ const BotLab: React.FC = () => {
     const [bots, setBots] = useState<ActiveBot[]>([]);
     const { showToast } = useToast();
 
+    const [isBacktestModalOpen, setIsBacktestModalOpen] = useState(false);
+    const [selectedBot, setSelectedBot] = useState<ActiveBot | null>(null);
+    const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
+
     // ✅ ১. পেজ লোড হলে ব্যাকএন্ড থেকে বট লোড করা
     useEffect(() => {
         loadBots();
@@ -848,26 +832,21 @@ const BotLab: React.FC = () => {
             const data = await botService.getAllBots();
             setBots(data);
         } catch (error) {
-            console.error("Failed to load bots:", error);
-            // showToast("Failed to load bots", "error"); // Optional: Might be too noisy on polling
+            console.error("Failed to load bots", error);
+            showToast("Failed to load bots", "error");
         }
     };
 
-    // ✅ ৩. লাইভ আপডেটের জন্য পোলিং (Simple Solution)
+    // লাইভ PnL আপডেট পাওয়ার জন্য (Polling)
     useEffect(() => {
         const interval = setInterval(() => {
-            // শুধু যদি কোনো বট অ্যাক্টিভ থাকে তবেই রিকোয়েস্ট পাঠাবে
             if (bots.some(b => b.status === 'active')) {
                 loadBots();
             }
-        }, 5000); // ৫ সেকেন্ড পর পর আপডেট
+        }, 5000);
 
         return () => clearInterval(interval);
     }, [bots]);
-
-    const [isBacktestModalOpen, setIsBacktestModalOpen] = useState(false);
-    const [selectedBot, setSelectedBot] = useState<ActiveBot | null>(null);
-    const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
 
     const handleRunBacktest = (bot: ActiveBot) => {
         showToast(`Starting backtest for ${bot.name}...`, 'info');
@@ -889,26 +868,9 @@ const BotLab: React.FC = () => {
         }, 1500);
     };
 
-    const handleDeleteBot = async (id: string) => {
-        if (!window.confirm("Are you sure you want to delete this bot? This action cannot be undone.")) {
-            return;
-        }
-
-        try {
-            await botService.deleteBot(id);
-            setBots(prev => prev.filter(b => b.id !== id));
-            showToast("Bot deleted successfully", "success");
-        } catch (error) {
-            console.error("Failed to delete bot:", error);
-            showToast("Failed to delete bot", "error");
-        }
-    };
-
-    // ✅ ২. নতুন বট তৈরি হ্যান্ডলার আপডেট
     // ✅ ২. নতুন বট তৈরি হ্যান্ডলার আপডেট
     const handleCreateBot = async (newBotData: any) => {
         try {
-            // সার্ভিস কল
             const createdBot = await botService.createBot(newBotData);
             setBots(prev => [createdBot, ...prev]);
             showToast(`Bot "${createdBot.name}" launched successfully!`, 'success');
@@ -929,16 +891,10 @@ const BotLab: React.FC = () => {
             status: 'active',
             isRegimeAware: true,
         };
-        // For visual strategy, we might need a special API endpoint or just use createBot
-        // For now, let's just use createBot generally or keep local for visual builder if no backend support yet/
-        // Assuming we want to persist it:
-        botService.createBot(newBot)
-            .then(created => {
-                setBots(prev => [created, ...prev]);
-                setIsVisualBuilderOpen(false);
-                showToast(`Visual Strategy "${name}" deployed!`, 'success');
-            })
-            .catch(() => showToast("Failed to deploy visual strategy", "error"));
+        // ভিজ্যুয়াল স্ট্র্যাটেজির জন্য এখনো ব্যাকএন্ড তৈরি হয়নি, তাই এটি আগের মতোই থাকল
+        setBots(prev => [newBot, ...prev]);
+        setIsVisualBuilderOpen(false);
+        showToast(`Visual Strategy "${name}" deployed!`, 'success');
     };
 
     // ✅ ৩. স্ট্যাটাস টগল (Start/Stop) হ্যান্ডলার আপডেট
@@ -949,17 +905,31 @@ const BotLab: React.FC = () => {
         const action = bot.status === 'active' ? 'stop' : 'start';
 
         try {
-            // অপটিমিস্টিক আপডেট (UI আগে আপডেট হবে)
+            // অপটিমিস্টিক আপডেট
             setBots(prev => prev.map(b => b.id === id ? { ...b, status: action === 'start' ? 'active' : 'inactive' } : b));
 
-            // API কল
             await botService.controlBot(id, action);
 
             showToast(`${bot.name} is now ${action === 'start' ? 'Running' : 'Stopped'}.`, 'success');
         } catch (error) {
-            // এরর হলে আগের অবস্থায় ফেরত নেওয়া
             loadBots();
             showToast(`Failed to ${action} bot`, "error");
+        }
+    };
+
+    // ✅ ৪. ডিলেট হ্যান্ডলার
+    const handleDeleteBot = async (id: string) => {
+        if (!window.confirm("Are you sure you want to delete this bot? This action cannot be undone.")) {
+            return;
+        }
+
+        try {
+            await botService.deleteBot(id);
+            setBots(prev => prev.filter(b => b.id !== id));
+            showToast("Bot deleted successfully", "success");
+        } catch (error) {
+            console.error(error);
+            showToast("Failed to delete bot", "error");
         }
     };
 
@@ -1025,4 +995,3 @@ const BotLab: React.FC = () => {
 };
 
 export default BotLab;
-
