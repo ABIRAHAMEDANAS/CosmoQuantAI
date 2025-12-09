@@ -118,3 +118,6 @@ class DownloadRequest(BaseModel):
 class ConversionRequest(BaseModel):
     filename: str
     timeframe: str = "1min" # Default value
+
+# --- Bot Schemas (NEW) ---
+from .bot import Bot, BotCreate, BotUpdate

@@ -21,6 +21,7 @@ class User(Base):
 
     # Relationships
     api_keys = relationship("ApiKey", back_populates="owner")
+    bots = relationship("Bot", back_populates="owner")
 
 # 2. API Keys Model
 class ApiKey(Base):
@@ -72,3 +73,5 @@ class MarketData(Base):
         Index('idx_market_data_lookup', 'symbol', 'timeframe', 'timestamp'),
         {'extend_existing': True}
     )
+
+from .bot import Bot
