@@ -20,15 +20,15 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS
-if settings.BACKEND_CORS_ORIGINS:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+# ✅ FIX 1: CORS Settings (Allow All for Development)
+# এটি WebSocket এবং Frontend-Backend কানেকশন এরর ফিক্স করবে
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # ডেভেলপমেন্টের জন্য সব অরিজিন এলাও করা হলো
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Include API Router
 app.include_router(api_router, prefix=settings.API_V1_STR)
@@ -102,9 +102,7 @@ async def startup_event():
 async def shutdown_event():
     print("🛑 Server Shutdown Initiated.")
 
-# Keeping WebSockets at root for now to preserve URL structure /ws/...
-# Or migrating them to new structure if preferred. 
-# Providing compatibility here.
+# WebSocket Endpoints
 @app.websocket("/ws/market-data/{symbol}")
 async def websocket_endpoint(websocket: WebSocket, symbol: str):
     await manager.connect(websocket, symbol)

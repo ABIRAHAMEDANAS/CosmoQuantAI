@@ -1,13 +1,21 @@
 import apiClient from './client';
 
-// ইউজারের সেভ করা API Key গুলো নিয়ে আসা
+export interface ApiKeyPayload {
+    exchange: string;
+    api_key: string;
+    secret_key: string;
+}
+
+// ✅ ফিক্স: পাথগুলো '/users' এবং '/v1' সহ আপডেট করা হয়েছে
+
 export const fetchApiKeys = async () => {
-    const response = await apiClient.get('/api-keys');
+    // আগে ছিল: '/api-keys' অথবা '/users/api-keys'
+    // এখন হবে:
+    const response = await apiClient.get('/v1/users/api-keys');
     return response.data;
 };
 
-// নতুন API Key সেভ করা
-export const saveApiKey = async (data: { exchange: string; api_key: string; secret_key: string }) => {
-    const response = await apiClient.post('/api-keys', data);
+export const saveApiKey = async (data: ApiKeyPayload) => {
+    const response = await apiClient.post('/v1/users/api-keys', data);
     return response.data;
 };

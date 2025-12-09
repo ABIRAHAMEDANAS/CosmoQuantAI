@@ -1,7 +1,9 @@
 import axios from 'axios';
 
+// ✅ FIX 2: Base URL Direct to Backend Port 8000
+// ডেভেলপমেন্টে সরাসরি ব্যাকএন্ড পোর্টে হিট করা নিরাপদ
 const apiClient = axios.create({
-    baseURL: '/api', // এটি ঠিক আছে, কারণ Nginx /api কে হ্যান্ডেল করছে
+    baseURL: 'http://localhost:8000/api',
     headers: { 'Content-Type': 'application/json' },
 });
 
@@ -31,10 +33,8 @@ apiClient.interceptors.response.use(
                     throw new Error("No refresh token");
                 }
 
-                // **FIX:** এখানে পাথ আপডেট করা হয়েছে
-                // আগে ছিল: '/api/refresh-token'
-                // এখন হবে: '/api/v1/auth/refresh-token'
-                const { data } = await axios.post('/api/v1/auth/refresh-token', { refresh_token: refreshToken });
+                // পাথ আপডেট: /v1/auth/refresh-token
+                const { data } = await axios.post('http://localhost:8000/api/v1/auth/refresh-token', { refresh_token: refreshToken });
 
                 localStorage.setItem('accessToken', data.access_token);
 

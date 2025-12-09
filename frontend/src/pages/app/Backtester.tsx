@@ -12,7 +12,7 @@ import CodeEditor from '@/components/common/CodeEditor';
 import type { BacktestResult, Timeframe } from '@/types';
 
 import { useToast } from '@/context/ToastContext';
-import { syncMarketData, runBacktestApi, runOptimizationApi, getBacktestStatus, getExchangeList, getExchangeMarkets, uploadStrategyFile, generateStrategy, fetchCustomStrategyList, fetchStrategyCode, revokeBacktestTask, uploadBacktestDataFile, downloadCandles, downloadTrades, getDownloadStatus, runBatchBacktest, getTaskStatus, fetchStandardStrategyParams } from '@/services/backtester';
+import { syncMarketData, runBacktestApi, runOptimizationApi, getBacktestStatus, getExchangeList, getExchangeMarkets, uploadStrategyFile, generateStrategy, fetchCustomStrategyList, fetchStrategyCode, revokeBacktestTask, uploadBacktestDataFile, downloadCandles, downloadTrades, getDownloadStatus, runBatchBacktest, getTaskStatus, fetchStandardStrategyParams, fetchTradeFiles } from '@/services/backtester';
 import { useBacktest } from '@/context/BacktestContext';
 import { AIFoundryIcon } from '@/constants';
 import SearchableSelect from '@/components/common/SearchableSelect';
@@ -581,12 +581,14 @@ const Backtester: React.FC = () => {
         }
     };
 
-    // নতুন ফাংশন: ফাইল লিস্ট রিফ্রেশ করার জন্য
+    // ✅ FIX 3: Correct Function to Fetch Trade Files
     const refreshTradeFiles = async () => {
         try {
-            const res = await fetch('http://localhost:8000/api/v1/list-trade-files');
-            if (res.ok) {
-                const files = await res.json();
+            // আগে এখানে ভুল URL এ সরাসরি fetch কল ছিল
+            // এখন আমরা সার্ভিসের সঠিক ফাংশন ব্যবহার করছি
+            const files = await fetchTradeFiles();
+
+            if (Array.isArray(files)) {
                 setTradeFiles(files);
                 // যদি আগে কিছু সিলেক্ট করা না থাকে, তবে প্রথমটি সিলেক্ট করো
                 if (files.length > 0 && !selectedTradeFile) {
@@ -595,6 +597,7 @@ const Backtester: React.FC = () => {
             }
         } catch (error) {
             console.error("Failed to fetch trade files", error);
+            showToast("Failed to load trade files", "error");
         }
     };
 
