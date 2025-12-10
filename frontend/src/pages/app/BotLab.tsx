@@ -13,6 +13,7 @@ import { botService } from '@/services/botService';
 import SearchableSelect from '@/components/common/SearchableSelect';
 import { strategyService } from '@/services/strategyService';
 import client from '@/services/client';
+import { runBacktestApi, getBacktestStatus } from '@/services/backtester';
 
 // Icons
 const PlayIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
@@ -138,10 +139,11 @@ const MiniEquityChart: React.FC<{ isPositive: boolean; id: string }> = ({ isPosi
 const BotCard: React.FC<{
     bot: ActiveBot;
     index: number;
+    isLoading?: boolean; // New Prop
     onRunBacktest: (bot: ActiveBot) => void;
     onToggleStatus: (id: string) => void;
     onDelete: (id: string) => void;
-}> = ({ bot, index, onRunBacktest, onToggleStatus, onDelete }) => {
+}> = ({ bot, index, isLoading, onRunBacktest, onToggleStatus, onDelete }) => {
     const isPositive = bot.pnl >= 0;
     const statusColor = bot.status === 'active' ? 'bg-brand-success' : 'bg-gray-400';
     const statusGlow = bot.status === 'active' ? 'shadow-[0_0_10px_rgba(16,185,129,0.5)]' : '';
@@ -217,8 +219,17 @@ const BotCard: React.FC<{
                         variant="secondary"
                         className="text-xs px-3 h-8 bg-white dark:bg-brand-darkest border border-gray-200 dark:border-brand-border-dark shadow-sm hover:shadow-md"
                         onClick={() => onRunBacktest(bot)}
+                        disabled={isLoading}
                     >
-                        Run Backtest
+                        {isLoading ? (
+                            <span className="flex items-center gap-2">
+                                <svg className="animate-spin h-3 w-3 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Running...
+                            </span>
+                        ) : "Run Backtest"}
                     </Button>
                 </div>
             </div>
@@ -986,6 +997,9 @@ const BotLab: React.FC = () => {
     const [bots, setBots] = useState<ActiveBot[]>([]);
     const { showToast } = useToast();
 
+    // লোডিং স্টেট ট্র্যাক করার জন্য নতুন স্টেট
+    const [backtestingBotId, setBacktestingBotId] = useState<string | null>(null);
+
     const [isBacktestModalOpen, setIsBacktestModalOpen] = useState(false);
     const [selectedBot, setSelectedBot] = useState<ActiveBot | null>(null);
     const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
@@ -1016,24 +1030,88 @@ const BotLab: React.FC = () => {
         return () => clearInterval(interval);
     }, [bots]);
 
-    const handleRunBacktest = (bot: ActiveBot) => {
-        showToast(`Starting backtest for ${bot.name}...`, 'info');
-        setTimeout(() => {
-            const mockResult: BacktestResult = {
-                ...MOCK_BACKTEST_RESULTS[0],
-                id: `backtest_${bot.id}`,
-                market: bot.market,
+    const handleRunBacktest = async (bot: ActiveBot) => {
+        if (backtestingBotId) return;
+
+        setBacktestingBotId(bot.id);
+        showToast(`Starting analysis for ${bot.name}...`, 'info');
+
+        try {
+            const endDate = new Date();
+            const startDate = new Date();
+            startDate.setMonth(endDate.getMonth() - 3);
+
+            const payload = {
+                symbol: bot.market,
+                timeframe: bot.timeframe || '1h',
                 strategy: bot.strategy,
-                date: new Date().toISOString().split('T')[0],
-                profitPercent: (Math.random() * 120) - 20,
-                maxDrawdown: Math.random() * 30,
-                winRate: 40 + Math.random() * 50,
-                sharpeRatio: Math.random() * 3,
+                initial_cash: bot.trade_value || 10000,
+                start_date: startDate.toISOString().split('T')[0],
+                end_date: endDate.toISOString().split('T')[0],
+                params: bot.config?.strategyParams || {},
+                commission: 0.001,
+                slippage: 0
             };
-            setBacktestResult(mockResult);
-            setSelectedBot(bot);
-            setIsBacktestModalOpen(true);
-        }, 1500);
+
+            const initialRes = await runBacktestApi(payload);
+            const taskId = initialRes.task_id;
+
+            const interval = setInterval(async () => {
+                try {
+                    const statusRes = await getBacktestStatus(taskId);
+
+                    if (statusRes.status === 'Completed') {
+                        clearInterval(interval);
+                        setBacktestingBotId(null);
+
+                        if (statusRes.result?.error) {
+                            showToast(`Backtest Error: ${statusRes.result.error}`, 'error');
+                        } else {
+                            // ✅ FIX: Mapping Backend Response to Frontend Interface
+                            const raw = statusRes.result;
+                            const metrics = raw.advanced_metrics || {};
+
+                            const finalResult: BacktestResult = {
+                                id: `bt_${Date.now()}`,
+                                market: bot.market,
+                                strategy: bot.strategy,
+                                date: new Date().toISOString().split('T')[0],
+
+                                // Mapping fields carefully
+                                profit_percent: raw.profit_percent ?? 0,
+                                profitPercent: raw.profit_percent ?? 0,
+                                maxDrawdown: metrics.max_drawdown ?? 0,
+                                winRate: metrics.win_rate ?? 0,
+                                sharpeRatio: metrics.sharpe ?? 0,
+
+                                // Passing other data if needed
+                                totalTrades: raw.total_trades ?? 0,
+                                finalValue: raw.final_value ?? 0
+                            };
+
+                            setBacktestResult(finalResult);
+                            setSelectedBot(bot);
+                            setIsBacktestModalOpen(true);
+                            showToast('Backtest Completed Successfully!', 'success');
+                        }
+                    } else if (statusRes.status === 'Failed') {
+                        clearInterval(interval);
+                        setBacktestingBotId(null);
+                        showToast(`Backtest Failed: ${statusRes.error}`, 'error');
+                    }
+                } catch (e) {
+                    console.error("Polling error:", e);
+                    clearInterval(interval);
+                    setBacktestingBotId(null);
+                    showToast('Network error during backtest', 'error');
+                }
+            }, 1000);
+
+        } catch (error) {
+            console.error("Backtest initiation failed:", error);
+            setBacktestingBotId(null);
+            showToast('Failed to start backtest process', 'error');
+        }
     };
 
     // ✅ ২. নতুন বট তৈরি হ্যান্ডলার আপডেট
@@ -1137,6 +1215,7 @@ const BotLab: React.FC = () => {
                         key={bot.id}
                         bot={bot}
                         index={index}
+                        isLoading={backtestingBotId === bot.id}
                         onRunBacktest={handleRunBacktest}
                         onToggleStatus={handleToggleStatus}
                         onDelete={handleDeleteBot}

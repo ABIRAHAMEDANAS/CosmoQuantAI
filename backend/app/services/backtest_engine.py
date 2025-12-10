@@ -97,6 +97,20 @@ class BacktestEngine:
 
         if df is None:
             candles = market_service.get_candles_from_db(db, symbol, timeframe, start_date, end_date)
+
+            # ✅ NEW: Auto-Sync Logic (If data is missing, auto-download)
+            if not candles or len(candles) < 20:
+                print(f"📉 Data missing for {symbol} {timeframe}. Auto-syncing from Exchange...")
+                if progress_callback: progress_callback(5)
+                try:
+                    # Run async fetch synchronously
+                    asyncio.run(market_service.fetch_and_store_candles(
+                        db=db, symbol=symbol, timeframe=timeframe, start_date=start_date, end_date=end_date, limit=1000
+                    ))
+                    # Reload data from DB
+                    candles = market_service.get_candles_from_db(db, symbol, timeframe, start_date, end_date)
+                except Exception as e:
+                    print(f"❌ Auto-sync failed: {e}")
             
             if not candles or len(candles) < 20:
                 if timeframe == '45m':

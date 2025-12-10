@@ -35,17 +35,24 @@ export interface ActiveBot {
   strategy: string;
   timeframe?: string; // ✅ নতুন
   tradeValue?: number; // ✅ নতুন
+  trade_value?: number; // ✅ For backend compatibility
   tradeUnit?: string; // ✅ নতুন
+  trade_unit?: string; // ✅ For backend compatibility
   apiKeyId?: string; // ✅ নতুন
   pnl: number;
   pnlPercent: number;
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'paused';
   isRegimeAware?: boolean;
   regimeStrategies?: Partial<Record<MarketRegime, string>>;
   customModelId?: string;
   sentimentScore?: number;
   staticStopLoss?: number;
-  config?: any; // সব এক্সট্রা প্যারামিটারের জন্য
+  config?: {
+    strategyParams: Record<string, any>;
+    riskParams?: any;
+    deploymentTarget?: string;
+    [key: string]: any;
+  };
 }
 
 export interface BacktestMetrics {
@@ -103,6 +110,8 @@ export interface BacktestResult {
   winRate?: number;
   sharpeRatio?: number;
   profitPercent?: number;
+  totalTrades?: number;
+  finalValue?: number;
   params?: Record<string, number | string>;
 }
 

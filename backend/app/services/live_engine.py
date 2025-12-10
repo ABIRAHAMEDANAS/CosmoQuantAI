@@ -63,6 +63,64 @@ class LiveBotEngine:
         # if bot.api_key_id: ... (API Key setup code)
         self.exchange = ccxt.binance(exchange_options)
 
+    # ✅ Helper Methods for Smart Waiting
+    def _get_timeframe_seconds(self):
+        """Convert timeframe string to seconds."""
+        tf = self.timeframe
+        if tf.endswith('m'): return int(tf[:-1]) * 60
+        if tf.endswith('h'): return int(tf[:-1]) * 3600
+        if tf.endswith('d'): return int(tf[:-1]) * 86400
+        return 60 # default 1m
+
+    def _calculate_sleep_seconds(self):
+        """Calculate seconds until next candle close."""
+        now = datetime.now()
+        timestamp = now.timestamp()
+        tf_seconds = self._get_timeframe_seconds()
+        
+        # Next candle time = (Current Time // Timeframe) * Timeframe + Timeframe
+        next_candle_timestamp = ((timestamp // tf_seconds) + 1) * tf_seconds
+        
+        sleep_seconds = next_candle_timestamp - timestamp
+        return max(0, sleep_seconds)
+
+    async def _wait_for_next_candle(self):
+        """
+        Wait until the next candle close, but print heartbeat logs every 10-15 seconds.
+        Returns False if stopped during wait, True otherwise.
+        """
+        sleep_seconds = self._calculate_sleep_seconds()
+        
+        # If successfully waited for most of the time, we return True
+        # If sleep_seconds is very small (e.g. < 5s), we just wait and return
+        if sleep_seconds < 5:
+            await asyncio.sleep(sleep_seconds)
+            return True
+
+        print(f"⏳ {self.bot.name} is monitoring... (Next candle in {int(sleep_seconds)}s)")
+        
+        while sleep_seconds > 0:
+            # Check for stop signal via Redis
+            task_key = f"bot_task:{self.bot.id}"
+            if not self.redis.exists(task_key):
+                return False
+
+            # If we have a position, we SHOULD NOT wait long. 
+            # We should return immediately to let the main loop check Risk Management.
+            if self.position["amount"] > 0:
+                # We do a short sleep to prevent CPU spin, then return True to allow loop to proceed
+                await asyncio.sleep(5) 
+                return True
+
+            wait_chunk = min(sleep_seconds, 15) # Max wait 15s for heartbeat
+            await asyncio.sleep(wait_chunk)
+            
+            sleep_seconds -= wait_chunk
+            if sleep_seconds > 1: # Only print if meaningful time left
+                print(f"⏳ {self.bot.name} is monitoring... (Next check in {int(sleep_seconds)}s)")
+                
+        return True
+
     def setup_futures_settings(self):
         """ফিউচার্স ট্রেডিংয়ের জন্য লিভারেজ এবং মার্জিন মোড সেট করে।"""
         if self.deployment_target == 'future':
@@ -252,13 +310,23 @@ class LiveBotEngine:
         await manager.broadcast_to_symbol(f"bot_{self.bot.id}", {"status": "active", "message": "Engine Started"})
 
         while True:
+            # 1. Check Stop Signal
             if not self.redis.exists(task_key):
                 print(f"🛑 Stopping Bot {self.bot.name}...")
                 break
 
             try:
+                # 2. Smart Wait (Heartbeat & Candle Sync)
+                # If we have a position, _wait_for_next_candle returns quickly (every 5s)
+                # If no position, it waits for next candle with 15s heartbeat logs
+                should_continue = await self._wait_for_next_candle()
+                if not should_continue:
+                    break
+
+                # 3. Data Fetch
                 df = self.fetch_market_data()
                 if df is not None:
+
                     # ১. স্ট্র্যাটেজি সিগন্যাল চেক (শুধুমাত্র নতুন এন্ট্রির জন্য)
                     # যদি পজিশন খালি থাকে তবেই বাই সিগন্যাল খুঁজবে (সিম্পল লজিক)
                     if self.position["amount"] <= 0:
@@ -285,7 +353,12 @@ class LiveBotEngine:
                     }
                     await manager.broadcast_to_symbol(f"bot_updates", update_payload)
 
-                await asyncio.sleep(5) 
+                # Loop delay is handled by _wait_for_next_candle, 
+                # but if we skipped it or just processed, a small sleep is good safety
+                # (Removed explicit asyncio.sleep(5) because _wait_for_next_candle handles timing)
+                if self.position["amount"] > 0:
+                     pass # Risk management needs speed, loop will throttle via _wait_for_next_candle's short sleep
+ 
 
             except Exception as e:
                 print(f"❌ Bot Loop Error: {e}")
