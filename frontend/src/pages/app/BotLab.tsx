@@ -277,13 +277,17 @@ const BotDetailsModal: React.FC<{ bot: ActiveBot; onClose: () => void }> = ({ bo
                                     realLogs.map((log, i) => (
                                         <div key={i} className="mb-1.5 flex gap-3 border-b border-gray-900/50 pb-1 last:border-0">
                                             <span className="text-gray-500 select-none">[{log.time}]</span>
+
+                                            {/* লগের টাইপ অনুযায়ী কালার */}
                                             <span className={`${log.type === 'TRADE' ? 'text-yellow-400 font-bold' :
                                                     log.type === 'ERROR' ? 'text-red-500 font-bold' :
-                                                        log.type === 'WAIT' ? 'text-gray-600' : 'text-blue-400'
-                                                } min-w-[50px]`}>
+                                                        log.type.startsWith('SYS-') ? 'text-purple-400' : // ✅ Backend Log Color
+                                                            log.type === 'WAIT' ? 'text-gray-600' : 'text-blue-400'
+                                                } min-w-[70px]`}>
                                                 {log.type}
                                             </span>
-                                            <span className="text-gray-300">{log.message}</span>
+
+                                            <span className="text-gray-300 break-all">{log.message}</span>
                                         </div>
                                     ))
                                 )}

@@ -34,6 +34,12 @@ class ConnectionManager:
                     
     # Alias for backward compatibility if needed, or we can just update usages
     async def broadcast_to_symbol(self, symbol: str, message: dict):
-        await self.broadcast(message, symbol)
+        if symbol in self.active_connections:
+            # কপি করে লুপ চালানো সেফ
+            for connection in self.active_connections[symbol][:]:
+                try:
+                    await connection.send_json(message)
+                except Exception:
+                    self.disconnect(connection, symbol)
 
 manager = ConnectionManager()
