@@ -75,12 +75,28 @@ def delete_bot(
     current_user: models.User = Depends(deps.get_current_user),
 ) -> Any:
     """
-    Delete a bot.
+    Delete a bot. If the bot is running, it force-stops the background task first.
     """
+    # ১. বট খুঁজে বের করা
     bot = db.query(models.Bot).filter(models.Bot.id == bot_id, models.Bot.owner_id == current_user.id).first()
     if not bot:
         raise HTTPException(status_code=404, detail="Bot not found")
         
+    # ✅ ২. লজিক: বট যদি একটিভ থাকে, তবে আগে ওয়ার্কার থামাতে হবে
+    # আমরা control_bot এর মতই Redis key ডিলিট করে লুপ থামিয়ে দেব
+    if bot.status == "active":
+        try:
+            r = utils.get_redis_client()
+            task_key = f"bot_task:{bot_id}"
+            
+            # Redis key ডিলিট করলে Celery টাস্কের লুপ ভেঙে যাবে
+            r.delete(task_key)
+            print(f"Force stopped worker for bot {bot_id} before deletion.")
+        except Exception as e:
+            print(f"Error stopping worker for bot {bot_id}: {e}")
+            # এরর হলেও আমরা ডিলিট প্রসেস চালিয়ে যাব, যাতে ডাটাবেস ক্লিন থাকে
+            
+    # ৩. ডাটাবেস থেকে বট মুছে ফেলা
     db.delete(bot)
     db.commit()
     return bot

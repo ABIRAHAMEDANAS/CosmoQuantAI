@@ -280,9 +280,9 @@ const BotDetailsModal: React.FC<{ bot: ActiveBot; onClose: () => void }> = ({ bo
 
                                             {/* লগের টাইপ অনুযায়ী কালার */}
                                             <span className={`${log.type === 'TRADE' ? 'text-yellow-400 font-bold' :
-                                                    log.type === 'ERROR' ? 'text-red-500 font-bold' :
-                                                        log.type.startsWith('SYS-') ? 'text-purple-400' : // ✅ Backend Log Color
-                                                            log.type === 'WAIT' ? 'text-gray-600' : 'text-blue-400'
+                                                log.type === 'ERROR' ? 'text-red-500 font-bold' :
+                                                    log.type.startsWith('SYS-') ? 'text-purple-400' : // ✅ Backend Log Color
+                                                        log.type === 'WAIT' ? 'text-gray-600' : 'text-blue-400'
                                                 } min-w-[70px]`}>
                                                 {log.type}
                                             </span>
@@ -1340,14 +1340,24 @@ const BotLab: React.FC = () => {
 
     // ✅ ৪. ডিলেট হ্যান্ডলার
     const handleDeleteBot = async (id: string) => {
-        if (!window.confirm("Are you sure you want to delete this bot? This action cannot be undone.")) {
+        // ডিলিট করার আগে চেক করি বটটি রানিং কিনা
+        const botToDelete = bots.find(b => b.id === id);
+
+        let confirmMessage = "Are you sure you want to delete this bot? This action cannot be undone.";
+
+        // যদি রানিং থাকে তবে কড়া ওয়ার্নিং মেসেজ দেখাব
+        if (botToDelete?.status === 'active') {
+            confirmMessage = "⚠️ WARNING: This bot is currently RUNNING!\n\nDeleting it will FORCE STOP the trading engine immediately.\n\nAre you sure you want to proceed?";
+        }
+
+        if (!window.confirm(confirmMessage)) {
             return;
         }
 
         try {
             await botService.deleteBot(id);
             setBots(prev => prev.filter(b => b.id !== id));
-            showToast("Bot deleted successfully", "success");
+            showToast("Bot stopped and deleted successfully", "success");
         } catch (error) {
             console.error(error);
             showToast("Failed to delete bot", "error");
