@@ -21,59 +21,60 @@ class LiveBotEngine:
         # ১. কনফিগারেশন লোড করা
         self.config = bot.config or {}
         
-        # Deployment Target এবং Risk Params পার্স করা
-        raw_target = self.config.get('deploymentTarget', 'Spot').lower()
-        # ccxt তে সাধারণত 'future' বা 'swap' ব্যবহার হয়, কিন্তু ফ্রন্টএন্ড 'futures' পাঠাতে পারে
-        self.deployment_target = 'future' if 'future' in raw_target else raw_target
-        
+        self.deployment_target = self.config.get('deploymentTarget', 'Spot').lower()
+        if 'future' in self.deployment_target: self.deployment_target = 'future'
+
         self.trade_value = bot.trade_value or 100.0
         self.trade_unit = bot.trade_unit or "QUOTE"
         self.order_type = self.config.get('orderType', 'Market').lower()
         
-        # Futures Specific Configs (Defaults)
-        self.leverage = int(self.config.get('riskParams', {}).get('leverage', 1)) # Default 1x
-        self.margin_mode = self.config.get('riskParams', {}).get('marginMode', 'ISOLATED').upper() # ISOLATED / CROSSED
+        # Futures Configs
+        self.leverage = int(self.config.get('riskParams', {}).get('leverage', 1))
+        self.margin_mode = self.config.get('riskParams', {}).get('marginMode', 'ISOLATED').upper()
 
-        # ২. এক্সচেঞ্জ ইনিশিয়ালাইজেশন
+        # ✅ Risk Management Configs
+        risk_params = self.config.get('riskParams', {})
+        self.stop_loss_pct = float(risk_params.get('stopLoss', 0)) # যেমন 2%
+        
+        # Take Profit কনফিগারেশন হ্যান্ডলিং (Single বা Multiple/Partial)
+        self.take_profits = []
+        raw_tp = risk_params.get('takeProfit') # এটা হতে পারে নাম্বার বা লিস্ট
+        
+        if isinstance(raw_tp, list):
+            # যদি ইউজার অ্যাডভান্সড পার্শিয়াল টিপি সেট করে
+            # Format: [{ "target": 5, "amount": 50 }, { "target": 10, "amount": 100 }]
+            self.take_profits = sorted(raw_tp, key=lambda x: x['target'])
+        elif raw_tp and float(raw_tp) > 0:
+            # যদি সিম্পল একটা টিপি দেয় (Standard) -> 100% সেল
+            self.take_profits = [{"target": float(raw_tp), "amount": 100}]
+
+        # ✅ Position Tracking State (মেমোরিতে রাখা হচ্ছে, রিয়েল লাইফে ডাটাবেস/রেডিসে রাখা উচিত)
+        self.position = {
+            "amount": 0.0,      # কতগুলো কয়েন কেনা আছে
+            "entry_price": 0.0, # কেনা দাম কত
+            "tp_hits": []       # কোন কোন টিপি অলরেডি হিট করেছে
+        }
+
+        # এক্সচেঞ্জ সেটআপ (API Key ছাড়া পাবলিক ডাটার জন্য, ট্রেডের জন্য কী লাগবে)
         exchange_options = {
             'enableRateLimit': True,
             'options': {'defaultType': self.deployment_target} 
         }
-        
-        # TODO: প্রোডাকশনে রিয়েল API Key এবং Secret ডিক্রিপ্ট করে এখানে বসাতে হবে
-        # if bot.api_key_id:
-        #     api_key_data = get_api_key(bot.api_key_id)
-        #     exchange_options['apiKey'] = api_key_data.key
-        #     exchange_options['secret'] = api_key_data.secret
-
+        # if bot.api_key_id: ... (API Key setup code)
         self.exchange = ccxt.binance(exchange_options)
 
     def setup_futures_settings(self):
-        """
-        ফিউচার্স ট্রেডিংয়ের জন্য লিভারেজ এবং মার্জিন মোড সেট করে।
-        এটি লুপ শুরু হওয়ার আগে একবার কল করা উচিত।
-        """
+        """ফিউচার্স ট্রেডিংয়ের জন্য লিভারেজ এবং মার্জিন মোড সেট করে।"""
         if self.deployment_target == 'future':
             try:
-                # মার্কেট লোড করা জরুরি
                 self.exchange.load_markets()
-                
                 print(f"⚙️ Configuring Futures for {self.symbol}...")
-                
-                # ১. মার্জিন মোড সেট করা (ISOLATED / CROSSED)
                 try:
                     self.exchange.set_margin_mode(self.margin_mode, self.symbol)
-                    print(f"✅ Margin Mode set to {self.margin_mode}")
-                except Exception as e:
-                    print(f"⚠️ Failed to set Margin Mode: {e}")
-
-                # ২. লিভারেজ সেট করা
+                except Exception: pass
                 try:
                     self.exchange.set_leverage(self.leverage, self.symbol)
-                    print(f"✅ Leverage set to {self.leverage}x")
-                except Exception as e:
-                    print(f"⚠️ Failed to set Leverage: {e}")
-
+                except Exception: pass
             except Exception as e:
                 print(f"❌ Error configuring futures settings: {e}")
 
@@ -155,62 +156,85 @@ class LiveBotEngine:
 
         return signal, reason, last_row['close']
 
-    async def execute_trade(self, signal, price, reason):
-        """
-        সিগন্যাল অনুযায়ী অর্ডার প্লেস করা (Market vs Limit Logic)
-        """
+    # ✅ নতুন: রিস্ক ম্যানেজমেন্ট মনিটর (প্রতিটি প্রাইস আপডেটে কল হবে)
+    async def monitor_risk_management(self, current_price):
+        if self.position["amount"] <= 0:
+            return # কোনো পজিশন নেই, চেক করার দরকার নেই
+
+        entry_price = self.position["entry_price"]
+        pnl_pct = ((current_price - entry_price) / entry_price) * 100
+        
+        # ১. Stop Loss Check
+        if self.stop_loss_pct > 0 and pnl_pct <= -self.stop_loss_pct:
+            print(f"🛑 STOP LOSS HIT at {current_price} ({pnl_pct:.2f}%)")
+            await self.execute_trade("SELL", current_price, "Stop Loss Triggered", size_pct=100)
+            return
+
+        # ২. Take Profit Check (Partial / Full)
+        for i, tp in enumerate(self.take_profits):
+            # যদি এই টিপি আগে হিট না করে থাকে এবং প্রাইস টার্গেটে পৌঁছায়
+            if i not in self.position["tp_hits"] and pnl_pct >= tp["target"]:
+                print(f"🎯 TAKE PROFIT {i+1} HIT at {current_price} ({pnl_pct:.2f}%)")
+                
+                # পার্শিয়াল সেল এক্সিকিউট করা
+                await self.execute_trade("SELL", current_price, f"TP-{i+1} Hit ({tp['target']}%)", size_pct=tp['amount'])
+                
+                # এই টিপি মার্ক করে রাখা যাতে বারবার সেল না হয়
+                self.position["tp_hits"].append(i)
+
+    # ✅ আপডেটেড: execute_trade মেথড (Position State আপডেট সহ)
+    async def execute_trade(self, signal, price, reason, size_pct=100):
         try:
             side = 'buy' if signal == "BUY" else 'sell'
             
-            # ✅ ১. লিমিট প্রাইস নির্ধারণ
-            # ডিফল্ট হিসেবে কারেন্ট প্রাইস (price) নেওয়া হবে
+            # লিমিট প্রাইস লজিক (শুধুমাত্র এন্ট্রির জন্য)
             execution_price = price
-            
-            # যদি ইউজার ম্যানুয়ালি ফিক্সড প্রাইস দিয়ে থাকে এবং অর্ডার টাইপ Limit হয়
-            if self.order_type == 'limit' and self.config.get('limitPrice'):
+            if signal == "BUY" and self.order_type == 'limit' and self.config.get('limitPrice'):
                 execution_price = float(self.config['limitPrice'])
-                print(f"🎯 Using Manual Limit Price: {execution_price}")
 
-            amount = 0
-            # এমাউন্ট ক্যালকুলেশন (execution_price ব্যবহার করে)
-            if self.trade_unit == "QUOTE": 
-                amount = self.trade_value / execution_price
-            else: 
-                amount = self.trade_value
-
-            # Futures leverage handling...
-            if self.deployment_target == 'future':
-                # effective_amount calculation (log only)
-                pass
-
-            print(f"⚡ PREPARING {self.order_type.upper()} {side.upper()} ORDER")
-            print(f"   Symbol: {self.symbol} | Amount: {amount:.6f} | Price: {execution_price}")
-
-            params = {}
-            if self.deployment_target == 'future':
-                pass
-
-            # অর্ডার এক্সিকিউশন সিমুলেশন/রিয়েল
-            """
-            if self.exchange.apiKey:
-                if self.order_type == 'market':
-                    order = self.exchange.create_order(self.symbol, 'market', side, amount, params=params)
-                elif self.order_type == 'limit':
-                    # ✅ এখানে execution_price ব্যবহার করা হচ্ছে
-                    order = self.exchange.create_order(self.symbol, 'limit', side, amount, execution_price, params=params)
-                print(f"✅ Order Placed: {order['id']}")
-            else:
-                print("🔸 Simulation Mode: Order skipped (No API Key)")
-            """
-
-            # লগ আপডেট
-            action_msg = f"Executed {self.order_type.upper()} {side.upper()}"
-            if self.order_type == 'limit':
-                action_msg += f" @ {execution_price}"
-            else:
-                action_msg += " (Market Price)"
+            # এমাউন্ট ক্যালকুলেশন
+            trade_amount = 0.0
             
-            print(f"✅ {action_msg} | Size: {amount:.6f} | Reason: {reason}")
+            if signal == "BUY":
+                # এন্ট্রি লজিক: কনফিগারেশন অনুযায়ী কেনা
+                if self.trade_unit == "QUOTE": 
+                    trade_amount = self.trade_value / execution_price
+                else: 
+                    trade_amount = self.trade_value
+            
+            elif signal == "SELL":
+                # এক্সিট লজিক: বর্তমান পজিশনের ওপর ভিত্তি করে সেল
+                # size_pct হলো কত শতাংশ বেচতে হবে (Partial TP এর জন্য)
+                trade_amount = self.position["amount"] * (size_pct / 100)
+
+            # ফিউচার্স সিমুলেশন লগ
+            if self.deployment_target == 'future':
+                pass 
+
+            print(f"⚡ EXECUTING {self.order_type.upper()} {side.upper()} | Size: {trade_amount:.6f} | Price: {execution_price}")
+
+            # --- State Update (Memory) ---
+            if signal == "BUY":
+                # পজিশন আপডেট (Simple adding, বাস্তবে Average Entry Price হিসাব করা উচিত)
+                self.position["amount"] += trade_amount
+                self.position["entry_price"] = execution_price # শেষ এন্ট্রি প্রাইস ধরা হচ্ছে
+                self.position["tp_hits"] = [] # নতুন ট্রেড, তাই টিপি রিসেট
+                print(f"📈 Position Opened/Added: {self.position['amount']:.6f} @ {self.position['entry_price']}")
+
+            elif signal == "SELL":
+                self.position["amount"] -= trade_amount
+                if self.position["amount"] < 0: self.position["amount"] = 0 # Safety
+                
+                remaining_pct = (self.position["amount"] * execution_price / self.trade_value) * 100 if self.trade_value else 0
+                print(f"📉 Position Reduced. Remaining: {self.position['amount']:.6f}")
+                
+                if self.position["amount"] <= 0.00001: # পজিশন খালি হয়ে গেলে রিসেট
+                     print("✅ Position Fully Closed.")
+                     self.position["amount"] = 0
+                     self.position["tp_hits"] = []
+
+            # --- Real CCXT Order (Commented) ---
+            # if self.exchange.apiKey: ...
             
             return True
 
@@ -222,7 +246,6 @@ class LiveBotEngine:
         task_key = f"bot_task:{self.bot.id}"
         print(f"🚀 Bot {self.bot.name} started on {self.symbol} [{self.deployment_target}]")
         
-        # ১. ফিউচার্স হলে সেটিংস কনফিগার করা
         if self.deployment_target == 'future':
             self.setup_futures_settings()
 
@@ -236,31 +259,36 @@ class LiveBotEngine:
             try:
                 df = self.fetch_market_data()
                 if df is not None:
-                    signal, reason, current_price = self.check_strategy_signal(df)
-                    
-                    if signal in ["BUY", "SELL"]:
-                        print(f"🔔 Signal Found: {signal} | Reason: {reason}")
-                        await self.execute_trade(signal, current_price, reason)
-                        
-                        # Demo PnL Update logic here...
+                    # ১. স্ট্র্যাটেজি সিগন্যাল চেক (শুধুমাত্র নতুন এন্ট্রির জন্য)
+                    # যদি পজিশন খালি থাকে তবেই বাই সিগন্যাল খুঁজবে (সিম্পল লজিক)
+                    if self.position["amount"] <= 0:
+                        signal, reason, current_price = self.check_strategy_signal(df)
+                        if signal == "BUY":
+                            print(f"🔔 Buy Signal: {reason}")
+                            await self.execute_trade("BUY", current_price, reason)
+                    else:
+                        # পজিশন থাকলে কারেন্ট প্রাইস আপডেট নেওয়া
+                        current_price = df.iloc[-1]['close']
 
-                    # Live Status Update
-                    simulated_pnl = self.bot.pnl + (current_price * 0.00001) if signal == "HOLD" else self.bot.pnl
+                    # ২. রিস্ক ম্যানেজমেন্ট মনিটর (সবসময় চলবে যদি পজিশন থাকে)
+                    await self.monitor_risk_management(df.iloc[-1]['close'])
+
+                    # ৩. লাইভ স্ট্যাটাস ব্রডকাস্ট
+                    pnl_val = (df.iloc[-1]['close'] - self.position["entry_price"]) * self.position["amount"] if self.position["amount"] > 0 else 0
+                    
                     update_payload = {
                         "bot_id": self.bot.id,
-                        "price": current_price,
-                        "pnl": simulated_pnl,
-                        "signal": signal,
+                        "price": df.iloc[-1]['close'],
+                        "pnl": self.bot.pnl + pnl_val, # Cumulative + Unrealized
+                        "signal": "HOLD" if self.position["amount"] > 0 else "WAIT",
                         "timestamp": datetime.now().isoformat()
                     }
                     await manager.broadcast_to_symbol(f"bot_updates", update_payload)
-                    
-                    print(f"✅ {self.bot.name}: {current_price} | {signal}")
 
-                await asyncio.sleep(10) 
+                await asyncio.sleep(5) 
 
             except Exception as e:
                 print(f"❌ Bot Loop Error: {e}")
-                await asyncio.sleep(10)
+                await asyncio.sleep(5)
         
         await manager.broadcast_to_symbol(f"bot_{self.bot.id}", {"status": "stopped"})
