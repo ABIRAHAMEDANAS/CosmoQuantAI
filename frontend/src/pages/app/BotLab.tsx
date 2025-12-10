@@ -498,6 +498,7 @@ const CreateBotModal: React.FC<{
     const [timeframe, setTimeframe] = useState('1h');
     const [deploymentTarget, setDeploymentTarget] = useState<'Spot' | 'Futures' | 'Margin'>('Spot');
     const [orderType, setOrderType] = useState<'Market' | 'Limit'>('Market');
+    const [limitPrice, setLimitPrice] = useState('');
 
     // Risk Management
     const [riskParams, setRiskParams] = useState({
@@ -641,7 +642,8 @@ const CreateBotModal: React.FC<{
                 advanced,
                 notifications,
                 deploymentTarget,
-                orderType
+                orderType,
+                limitPrice: orderType === 'Limit' && limitPrice ? Number(limitPrice) : null
             }
         };
 
@@ -748,8 +750,9 @@ const CreateBotModal: React.FC<{
                             </div>
                         </div>
 
-                        {/* Deployment Target & Order Type */}
+                        {/* Deployment Target & Order Type Section */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+                            {/* Deployment Target (আগের কোড) */}
                             <div>
                                 <label className={labelClasses}>Deployment Target</label>
                                 <div className="flex p-1 bg-gray-100 dark:bg-brand-darkest/50 rounded-xl border border-gray-200 dark:border-brand-border-dark">
@@ -765,20 +768,42 @@ const CreateBotModal: React.FC<{
                                     ))}
                                 </div>
                             </div>
-                            <div>
-                                <label className={labelClasses}>Order Type</label>
-                                <div className="flex p-1 bg-gray-100 dark:bg-brand-darkest/50 rounded-xl border border-gray-200 dark:border-brand-border-dark">
-                                    {(['Market', 'Limit'] as const).map(type => (
-                                        <button
-                                            key={type}
-                                            type="button"
-                                            onClick={() => setOrderType(type)}
-                                            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${orderType === type ? 'bg-brand-primary text-white shadow-md' : 'text-gray-500 hover:text-gray-700 dark:hover:text-white'}`}
-                                        >
-                                            {type}
-                                        </button>
-                                    ))}
+
+                            {/* Order Type & Limit Price */}
+                            <div className="space-y-3">
+                                <div>
+                                    <label className={labelClasses}>Order Type</label>
+                                    <div className="flex p-1 bg-gray-100 dark:bg-brand-darkest/50 rounded-xl border border-gray-200 dark:border-brand-border-dark">
+                                        {(['Market', 'Limit'] as const).map(type => (
+                                            <button
+                                                key={type}
+                                                type="button"
+                                                onClick={() => setOrderType(type)}
+                                                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${orderType === type ? 'bg-brand-primary text-white shadow-md' : 'text-gray-500 hover:text-gray-700 dark:hover:text-white'}`}
+                                            >
+                                                {type}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
+
+                                {/* ✅ ম্যানুয়াল লিমিট প্রাইস ইনপুট (শুধুমাত্র Limit এর জন্য) */}
+                                {orderType === 'Limit' && (
+                                    <div className="animate-fade-in-down">
+                                        <label className={labelClasses}>Manual Limit Price (Optional)</label>
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+                                            <input
+                                                type="number"
+                                                className={`${inputClasses} pl-6`}
+                                                value={limitPrice}
+                                                onChange={e => setLimitPrice(e.target.value)}
+                                                placeholder="Signal Price"
+                                            />
+                                        </div>
+                                        <p className="text-[10px] text-gray-400 mt-1">Leave empty to use Strategy Signal Price</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
