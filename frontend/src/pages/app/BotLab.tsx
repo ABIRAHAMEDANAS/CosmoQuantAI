@@ -59,6 +59,12 @@ const TrashIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
     </svg>
 );
 
+const InfoIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+);
+
 // Animated Number Component
 const AnimatedNumber: React.FC<{ value: number; decimals?: number; prefix?: string; suffix?: string }> = ({ value, decimals = 2, prefix = '', suffix = '' }) => {
     const [displayValue, setDisplayValue] = useState(0);
@@ -136,6 +142,161 @@ const MiniEquityChart: React.FC<{ isPositive: boolean; id: string }> = ({ isPosi
     );
 };
 
+// ✅ Log Interface
+interface LogEntry {
+    time: string;
+    type: 'INFO' | 'TRADE' | 'ERROR' | 'SYSTEM' | 'WAIT';
+    message: string;
+}
+
+const BotDetailsModal: React.FC<{ bot: ActiveBot; onClose: () => void }> = ({ bot, onClose }) => {
+    const [activeTab, setActiveTab] = useState<'overview' | 'config' | 'logs'>('overview');
+    const [realLogs, setRealLogs] = useState<LogEntry[]>([]);
+    const [connectionStatus, setConnectionStatus] = useState("Connecting...");
+    const wsRef = useRef<WebSocket | null>(null);
+
+    // ✅ 1. WebSocket Connection for Real Logs
+    useEffect(() => {
+        if (activeTab === 'logs') {
+            // URL তৈরি (dev/prod অনুযায়ী হোস্ট ঠিক করুন)
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = 'localhost:8000'; // আপনার ব্যাকএন্ড পোর্ট
+            const wsUrl = `${protocol}//${host}/ws/logs/${bot.id}`;
+
+            const ws = new WebSocket(wsUrl);
+            wsRef.current = ws;
+
+            ws.onopen = () => {
+                setConnectionStatus("Connected to Live Stream 🟢");
+                // কানেক্ট হওয়ার পর একটি ওয়েলকাম লগ যোগ করা
+                setRealLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), type: 'SYSTEM', message: 'Connected to Log Stream...' }]);
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    // নতুন লগ উপরে বা নিচে যোগ করতে পারেন
+                    setRealLogs(prev => [data, ...prev]);
+                } catch (e) {
+                    console.error("Log parse error", e);
+                }
+            };
+
+            ws.onclose = () => setConnectionStatus("Disconnected 🔴");
+
+            return () => {
+                ws.close();
+            };
+        }
+    }, [activeTab, bot.id]);
+
+    return createPortal(
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-backdrop-fade-in" onClick={onClose}>
+            <div className="bg-white dark:bg-brand-dark w-full max-w-4xl rounded-2xl shadow-2xl h-[80vh] flex flex-col animate-modal-content-slide-down overflow-hidden border border-gray-200 dark:border-brand-border-dark" onClick={e => e.stopPropagation()}>
+
+                {/* Header */}
+                <div className="p-6 border-b border-gray-200 dark:border-brand-border-dark flex justify-between items-center bg-gray-50 dark:bg-brand-darkest/30">
+                    <div className="flex items-center gap-3">
+                        <div className={`w-3 h-3 rounded-full ${bot.status === 'active' ? 'bg-brand-success animate-pulse' : 'bg-gray-400'}`}></div>
+                        <div>
+                            <h2 className="text-xl font-bold text-slate-900 dark:text-white">{bot.name}</h2>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 font-mono mt-0.5">{bot.id}</p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="text-gray-400 hover:text-red-500 text-2xl">&times;</button>
+                </div>
+
+                {/* Tabs */}
+                <div className="flex border-b border-gray-200 dark:border-brand-border-dark px-6">
+                    {['overview', 'config', 'logs'].map((tab) => (
+                        <button
+                            key={tab}
+                            onClick={() => setActiveTab(tab as any)}
+                            className={`px-4 py-3 text-sm font-medium capitalize border-b-2 transition-colors ${activeTab === tab ? 'border-brand-primary text-brand-primary' : 'text-gray-500'
+                                }`}
+                        >
+                            {tab}
+                        </button>
+                    ))}
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 overflow-y-auto p-6 bg-gray-50/50 dark:bg-brand-darkest/20">
+
+                    {/* ✅ FIXED: Real Data Mapping */}
+                    {activeTab === 'overview' && (
+                        <div className="space-y-6 animate-fade-in">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div className="bg-white dark:bg-brand-dark p-4 rounded-xl border border-gray-200 dark:border-brand-border-dark">
+                                    <p className="text-xs text-gray-500 uppercase font-bold">Total PnL</p>
+                                    <p className={`text-2xl font-bold mt-1 ${bot.pnl >= 0 ? 'text-brand-success' : 'text-brand-danger'}`}>
+                                        {bot.pnl >= 0 ? '+' : ''}${Math.abs(bot.pnl).toFixed(2)}
+                                    </p>
+                                </div>
+                                <div className="bg-white dark:bg-brand-dark p-4 rounded-xl border border-gray-200 dark:border-brand-border-dark">
+                                    <p className="text-xs text-gray-500 uppercase font-bold">Strategy</p>
+                                    {/* ✅ Fix: আসল স্ট্র্যাটেজি নাম দেখানো */}
+                                    <p className="text-lg font-bold mt-1 text-slate-900 dark:text-white truncate" title={bot.strategy}>
+                                        {bot.strategy}
+                                    </p>
+                                </div>
+                                <div className="bg-white dark:bg-brand-dark p-4 rounded-xl border border-gray-200 dark:border-brand-border-dark">
+                                    <p className="text-xs text-gray-500 uppercase font-bold">Market</p>
+                                    <p className="text-xl font-bold mt-1 text-brand-primary">{bot.market}</p>
+                                </div>
+                                <div className="bg-white dark:bg-brand-dark p-4 rounded-xl border border-gray-200 dark:border-brand-border-dark">
+                                    <p className="text-xs text-gray-500 uppercase font-bold">Timeframe</p>
+                                    <p className="text-xl font-bold mt-1 text-slate-900 dark:text-white">{bot.timeframe}</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* ✅ Configuration Tab */}
+                    {activeTab === 'config' && (
+                        <div className="bg-[#1e1e1e] p-4 rounded-xl border border-gray-700 font-mono text-sm overflow-x-auto">
+                            <pre className="text-green-400">
+                                {JSON.stringify(bot, null, 2)}
+                            </pre>
+                        </div>
+                    )}
+
+                    {/* ✅ REAL LIVE LOGS Tab */}
+                    {activeTab === 'logs' && (
+                        <div className="flex flex-col h-full">
+                            <div className="flex justify-between text-xs text-gray-500 mb-2">
+                                <span>Terminal Output</span>
+                                <span className={connectionStatus.includes("Connected") ? "text-green-500" : "text-red-500"}>
+                                    {connectionStatus}
+                                </span>
+                            </div>
+                            <div className="flex-1 bg-black rounded-xl border border-gray-800 p-4 font-mono text-xs overflow-y-auto custom-scrollbar">
+                                {realLogs.length === 0 ? (
+                                    <div className="text-gray-600 text-center mt-10">Waiting for logs from server...</div>
+                                ) : (
+                                    realLogs.map((log, i) => (
+                                        <div key={i} className="mb-1.5 flex gap-3 border-b border-gray-900/50 pb-1 last:border-0">
+                                            <span className="text-gray-500 select-none">[{log.time}]</span>
+                                            <span className={`${log.type === 'TRADE' ? 'text-yellow-400 font-bold' :
+                                                    log.type === 'ERROR' ? 'text-red-500 font-bold' :
+                                                        log.type === 'WAIT' ? 'text-gray-600' : 'text-blue-400'
+                                                } min-w-[50px]`}>
+                                                {log.type}
+                                            </span>
+                                            <span className="text-gray-300">{log.message}</span>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>,
+        document.body
+    );
+};
+
 const BotCard: React.FC<{
     bot: ActiveBot;
     index: number;
@@ -143,7 +304,8 @@ const BotCard: React.FC<{
     onRunBacktest: (bot: ActiveBot) => void;
     onToggleStatus: (id: string) => void;
     onDelete: (id: string) => void;
-}> = ({ bot, index, isLoading, onRunBacktest, onToggleStatus, onDelete }) => {
+    onDetails: (bot: ActiveBot) => void;
+}> = ({ bot, index, isLoading, onRunBacktest, onToggleStatus, onDelete, onDetails }) => {
     const isPositive = bot.pnl >= 0;
     const statusColor = bot.status === 'active' ? 'bg-brand-success' : 'bg-gray-400';
     const statusGlow = bot.status === 'active' ? 'shadow-[0_0_10px_rgba(16,185,129,0.5)]' : '';
@@ -202,6 +364,14 @@ const BotCard: React.FC<{
                     <div className="flex gap-2">
                         <button className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-brand-darkest text-gray-500 dark:text-gray-400 transition-colors" title="Settings">
                             <SettingsIcon />
+                        </button>
+
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onDetails(bot); }}
+                            className="p-2 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 text-gray-500 hover:text-blue-500 dark:text-gray-400 dark:hover:text-blue-400 transition-colors"
+                            title="Bot Details & Logs"
+                        >
+                            <InfoIcon />
                         </button>
 
                         {/* 🔴 DELETE BUTTON */}
@@ -1002,6 +1172,7 @@ const BotLab: React.FC = () => {
 
     const [isBacktestModalOpen, setIsBacktestModalOpen] = useState(false);
     const [selectedBot, setSelectedBot] = useState<ActiveBot | null>(null);
+    const [selectedDetailBot, setSelectedDetailBot] = useState<ActiveBot | null>(null);
     const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
 
     // ✅ ১. পেজ লোড হলে ব্যাকএন্ড থেকে বট লোড করা
@@ -1184,6 +1355,13 @@ const BotLab: React.FC = () => {
             {isCreating && <CreateBotModal onClose={() => setIsCreating(false)} onCreateBot={handleCreateBot} showToast={showToast} />}
             {isVisualBuilderOpen && <VisualStrategyBuilderModal onClose={() => setIsVisualBuilderOpen(false)} onSave={handleSaveVisualStrategy} />}
 
+            {selectedDetailBot && (
+                <BotDetailsModal
+                    bot={selectedDetailBot}
+                    onClose={() => setSelectedDetailBot(null)}
+                />
+            )}
+
             {isBacktestModalOpen && selectedBot && backtestResult && (
                 <BacktestResultModal
                     bot={selectedBot}
@@ -1219,6 +1397,7 @@ const BotLab: React.FC = () => {
                         onRunBacktest={handleRunBacktest}
                         onToggleStatus={handleToggleStatus}
                         onDelete={handleDeleteBot}
+                        onDetails={setSelectedDetailBot}
                     />
                 ))}
 

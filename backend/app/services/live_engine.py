@@ -332,7 +332,9 @@ class LiveBotEngine:
                     if self.position["amount"] <= 0:
                         signal, reason, current_price = self.check_strategy_signal(df)
                         if signal == "BUY":
-                            print(f"🔔 Buy Signal: {reason}")
+                            log_msg = f"🔔 Buy Signal: {reason}"
+                            # Removed duplicate print because 'log' method handles it.
+                            await self.log(log_msg, "TRADE")
                             await self.execute_trade("BUY", current_price, reason)
                     else:
                         # পজিশন থাকলে কারেন্ট প্রাইস আপডেট নেওয়া
@@ -351,17 +353,47 @@ class LiveBotEngine:
                         "signal": "HOLD" if self.position["amount"] > 0 else "WAIT",
                         "timestamp": datetime.now().isoformat()
                     }
-                    await manager.broadcast_to_symbol(f"bot_updates", update_payload)
+                    await manager.broadcast(update_payload, "bot_updates")
 
                 # Loop delay is handled by _wait_for_next_candle, 
                 # but if we skipped it or just processed, a small sleep is good safety
                 # (Removed explicit asyncio.sleep(5) because _wait_for_next_candle handles timing)
                 if self.position["amount"] > 0:
-                     pass # Risk management needs speed, loop will throttle via _wait_for_next_candle's short sleep
- 
+                     pass # Risk management needs speed.
 
             except Exception as e:
-                print(f"❌ Bot Loop Error: {e}")
+                err_msg = f"❌ Bot Loop Error: {e}"
+                print(err_msg)
+                await self.log(err_msg, "ERROR")
                 await asyncio.sleep(5)
         
-        await manager.broadcast_to_symbol(f"bot_{self.bot.id}", {"status": "stopped"})
+        stop_msg = f"🛑 Bot {self.bot.name} Stopped."
+        await self.log(stop_msg, "INFO")
+        
+        # Send final status update to Redis/WS
+        status_payload = {"status": "stopped", "bot_id": self.bot.id}
+        await manager.broadcast(status_payload, "bot_updates")
+        # Also publish status to Redis for cross-process awareness if needed
+        self.redis.publish("bot_updates", json.dumps(status_payload))
+
+    async def log(self, message: str, type: str = "INFO"):
+        """Publish logs to Redis instead of direct WebSocket manager"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        # ১. কনসোল লগ (Worker Terminal এ দেখাবে)
+        print(f"[{type}] {self.bot.name}: {message}", flush=True)
+
+        # ২. রেডিস পাবলিস (Backend এর জন্য)
+        log_payload = {
+            "channel": f"logs_{self.bot.id}",
+            "data": {
+                "time": timestamp,
+                "type": type,
+                "message": message
+            }
+        }
+        try:
+            # 'bot_logs' নামক গ্লোবাল চ্যানেলে পাঠাচ্ছি
+            self.redis.publish("bot_logs", json.dumps(log_payload))
+        except Exception as e:
+            print(f"⚠️ Redis Publish Error: {e}")
