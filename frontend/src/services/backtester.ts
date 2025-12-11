@@ -172,3 +172,10 @@ export const fetchTradeFiles = async () => {
     const response = await apiClient.get('/v1/backtest/trade-files');
     return response.data;
 };
+
+export const convertData = async (payload: { filename: string; timeframe: string }) => {
+    // আগে ভুল ছিল: '/v1/convert-data'
+    // ✅ সঠিক রাউট: '/v1/backtest/convert-data'
+    const response = await apiClient.post('/v1/backtest/convert-data', payload);
+    return response.data;
+};

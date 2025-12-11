@@ -446,15 +446,17 @@ const Backtester: React.FC = () => {
 
         setIsConverting(true);
         try {
-            const response = await fetch('http://localhost:8000/api/v1/convert-data', {
+            // ✅ ফিক্স: URL এ '/backtest' যোগ করা হয়েছে
+            // আগে ছিল: 'http://localhost:8000/api/v1/convert-data'
+            const response = await fetch('http://localhost:8000/api/v1/backtest/convert-data', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filename: selectedTradeFile }), // ⭐ ফাইলের নাম পাঠানো হচ্ছে
+                body: JSON.stringify({ filename: selectedTradeFile, timeframe: '1m' }), // প্রয়োজনে timeframe পাঠাতে পারেন
             });
 
             if (response.ok) {
                 showToast(`✅ Successfully converted: ${selectedTradeFile}`, 'success');
-                refreshTradeFiles(); // লিস্ট রিফ্রেশ (অপশনাল)
+                refreshTradeFiles();
             } else {
                 const errorData = await response.json();
                 showToast(`❌ Conversion Failed: ${errorData.detail}`, 'error');
