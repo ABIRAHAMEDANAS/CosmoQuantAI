@@ -206,6 +206,52 @@ class BacktestEngine:
         df['time'] = df.index.astype('int64') // 10**9 
         chart_candles = df[['time', 'open', 'high', 'low', 'close', 'volume']].to_dict(orient='records')
         
+        # ✅ Extract Equity Curve Data
+        equity_curve = []
+        try:
+            # ডিফল্টভাবে backtrader Broker Value রেকর্ড করে observer-এ
+            # আমরা সেখান থেকে ডাটা বের করব
+            if hasattr(first_strat, 'observers') and len(first_strat.observers) > 0:
+                # সাধারণত প্রথম observer টি Broker Value হয়
+                # তবে নিশ্চিত হতে আমরা নাম দিয়ে খুঁজতে পারি বা ধরে নিতে পারি
+                # observer[0] usually is the broker observer
+                stats = first_strat.observers[0]
+                
+                # Time এবং Value একসাথে ম্যাপ করা
+                # Note: This assumes data feed 0 aligns with observer length
+                # Safe approach using analyzed metrics if available, otherwise simplified extraction:
+                
+                # Alternative: Re-construct from candle timestamps
+                # We need to match timestamps with portfolio values.
+                # Backtrader stores values in strat.observers[0].lines.value
+                
+                observer_values = first_strat.observers[0].lines.value.array
+                
+                # ডাটা লেন্থ ম্যাচিং (কিছু সময় observer এর ডাটা কমবেশি হতে পারে প্রি-লোড বা ওয়ার্মআপের কারণে)
+                data_len = len(df)
+                obs_len = len(observer_values)
+                
+                # যতগুলো ক্যান্ডেল আছে, ততগুলো ভ্যালু নিচ্ছি
+                limit = min(data_len, obs_len)
+                
+                timestamps = df.index.astype('int64') // 10**9 # Timestamp array form DF
+                
+                # Taking the last 'limit' elements
+                # (Observer array is usually full length matching processed data)
+                vals = observer_values[:limit]
+                times = timestamps[-limit:]
+                
+                for t, v in zip(times, vals):
+                    if not np.isnan(v): # NaN ভ্যালু বাদ দেওয়া
+                        equity_curve.append({
+                            "time": int(t),
+                            "value": round(v, 2)
+                        })
+                        
+        except Exception as e:
+            print(f"⚠️ Error extracting equity curve: {e}")
+            equity_curve = []
+
         return {
             "status": "success",
             "symbol": symbol,
@@ -220,7 +266,8 @@ class BacktestEngine:
             "histogram_data": qs_metrics["histogram"],
             "trades_log": executed_trades, 
             "candle_data": chart_candles,
-            "trade_analysis": detailed_trade_analysis # ✅ NEW FIELD
+            "trade_analysis": detailed_trade_analysis,
+            "equity_curve": equity_curve  # ✅ NEW FIELD ADDED
         }
 
     # ✅ Helper to format TradeAnalyzer Output for Frontend

@@ -18,6 +18,7 @@ import { AIFoundryIcon } from '@/constants';
 import SearchableSelect from '@/components/common/SearchableSelect';
 import BacktestChart from '@/components/features/backtest/BacktestChart';
 import UnderwaterChart from '@/components/features/backtest/UnderwaterChart'; // ✅ Underwater Chart Import
+import EquityChart from '@/components/features/backtest/EquityChart';
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import MonthlyReturnsHeatmap from '@/components/features/backtest/MonthlyReturnsHeatmap';
@@ -1768,6 +1769,15 @@ const Backtester: React.FC = () => {
                                             <div className="flex items-center justify-center h-full text-gray-500">
                                                 No Candle Data Available
                                             </div>
+                                        )}
+                                    </div>
+
+                                    {/* ✅ 2. NEW Equity Curve Chart (TradingView Style) */}
+                                    <div className="mt-4">
+                                        {singleResult.equity_curve && singleResult.equity_curve.length > 0 ? (
+                                            <EquityChart data={singleResult.equity_curve} />
+                                        ) : (
+                                            <p className="text-center text-gray-500 py-4">No equity data available</p>
                                         )}
                                     </div>
 

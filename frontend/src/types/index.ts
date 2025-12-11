@@ -119,6 +119,7 @@ export interface BacktestResult {
   // New Metrics for TradingView Style Panel
   metrics?: BacktestMetrics;
   trade_analysis?: TradeAnalysisMetrics;
+  equity_curve?: { time: number; value: number }[]; // ✅ Add this line
 
   // ভিজ্যুয়ালাইজেশন ডেটা
   heatmap_data?: { year: number; month: number; value: number }[];
