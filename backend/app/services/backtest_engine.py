@@ -66,16 +66,10 @@ class BacktestEngine:
                     df = pd.read_csv(file_path)
                     df.columns = [c.lower().strip() for c in df.columns]
                     
-                    # ✅ IMPROVED DATE PARSING
-                    # ✅ IMPROVED DATE PARSING & VALIDATION
                     if 'datetime' in df.columns:
-                        # errors='coerce' reduces invalid formats to NaT
                         df['datetime'] = pd.to_datetime(df['datetime'], errors='coerce') 
-                        
-                        # Return error if all dates are invalid
                         if df['datetime'].isnull().all():
                             return {"error": "CSV Date format invalid. Use YYYY-MM-DD HH:MM:SS format."}
-                            
                         df.dropna(subset=['datetime'], inplace=True)
                         df.set_index('datetime', inplace=True)
                     elif 'date' in df.columns:
@@ -98,16 +92,13 @@ class BacktestEngine:
         if df is None:
             candles = market_service.get_candles_from_db(db, symbol, timeframe, start_date, end_date)
 
-            # ✅ NEW: Auto-Sync Logic (If data is missing, auto-download)
             if not candles or len(candles) < 20:
                 print(f"📉 Data missing for {symbol} {timeframe}. Auto-syncing from Exchange...")
                 if progress_callback: progress_callback(5)
                 try:
-                    # Run async fetch synchronously
                     asyncio.run(market_service.fetch_and_store_candles(
                         db=db, symbol=symbol, timeframe=timeframe, start_date=start_date, end_date=end_date, limit=1000
                     ))
-                    # Reload data from DB
                     candles = market_service.get_candles_from_db(db, symbol, timeframe, start_date, end_date)
                 except Exception as e:
                     print(f"❌ Auto-sync failed: {e}")
@@ -125,7 +116,6 @@ class BacktestEngine:
             if not candles or len(candles) < 20:
                  return {"error": "Insufficient Data in Database."}
 
-            # Optimization: Using direct tuple to DataFrame conversion for speed
             df = pd.DataFrame(candles, columns=['datetime', 'open', 'high', 'low', 'close', 'volume'])
             df.set_index('datetime', inplace=True)
 
@@ -178,9 +168,9 @@ class BacktestEngine:
         cerebro.addsizer(FractionalPercentSizer, percents=90)
         
         cerebro.addanalyzer(bt.analyzers.PyFolio, _name='pyfolio')
-        cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trades")
+        cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trades") # ✅ Standard Trade Analyzer
         cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
-        cerebro.addanalyzer(bt.analyzers.Transactions, _name="transactions") # ✅ Added for fallback history
+        cerebro.addanalyzer(bt.analyzers.Transactions, _name="transactions")
 
         start_value = cerebro.broker.getvalue()
         results = cerebro.run() 
@@ -190,7 +180,10 @@ class BacktestEngine:
         qs_metrics = self._calculate_metrics(first_strat, start_value, end_value)
         executed_trades = getattr(first_strat, 'trade_history', [])
         
-        # ✅ FIX: Fallback for Standard Strategies (Use Transactions Analyzer)
+        # ✅ Detailed Trade Analysis for Frontend (TradingView Style)
+        detailed_trade_analysis = self._format_trade_analysis(first_strat)
+
+        # Fallback for Trades Log if missing
         if not executed_trades:
             trans_anal = first_strat.analyzers.transactions.get_analysis()
             for dt, trans_list in trans_anal.items():
@@ -208,9 +201,6 @@ class BacktestEngine:
         df['time'] = df.index.astype('int64') // 10**9 
         chart_candles = df[['time', 'open', 'high', 'low', 'close', 'volume']].to_dict(orient='records')
         
-        trade_analysis = first_strat.analyzers.trades.get_analysis()
-        total_closed = trade_analysis.get('total', {}).get('closed', 0)
-
         return {
             "status": "success",
             "symbol": symbol,
@@ -218,14 +208,105 @@ class BacktestEngine:
             "initial_cash": initial_cash,
             "final_value": round(end_value, 2),
             "profit_percent": round((end_value - start_value) / start_value * 100, 2),
-            "total_trades": total_closed,
+            "total_trades": detailed_trade_analysis.get('total_closed', 0), # Updated to use detail
             "advanced_metrics": qs_metrics["metrics"],
             "heatmap_data": qs_metrics["heatmap"],
             "underwater_data": qs_metrics["underwater"],
             "histogram_data": qs_metrics["histogram"],
             "trades_log": executed_trades, 
-            "candle_data": chart_candles 
+            "candle_data": chart_candles,
+            "trade_analysis": detailed_trade_analysis # ✅ NEW FIELD
         }
+
+    # ✅ Helper to format TradeAnalyzer Output for Frontend
+    def _format_trade_analysis(self, strategy):
+        try:
+            analysis = strategy.analyzers.trades.get_analysis()
+            
+            # Helper to safely get values from nested dictionary
+            def get(d, keys, default=0):
+                for k in keys:
+                    if isinstance(d, dict): d = d.get(k, default)
+                    else: return default
+                return d
+
+            total = analysis.get('total', {})
+            won = analysis.get('won', {})
+            lost = analysis.get('lost', {})
+            pnl = analysis.get('pnl', {})
+            long_t = analysis.get('long', {})
+            short_t = analysis.get('short', {})
+
+            # 1. Basic Counts
+            total_closed = total.get('closed', 0)
+            total_open = total.get('open', 0)
+            total_won = won.get('total', 0)
+            total_lost = lost.get('total', 0)
+
+            # 2. Ratios
+            win_rate = (total_won / total_closed * 100) if total_closed > 0 else 0
+            
+            # 3. PnL Stats
+            gross_pnl = get(pnl, ['gross', 'total'])
+            net_pnl = get(pnl, ['net', 'total'])
+            avg_pnl = get(pnl, ['net', 'average'])
+            
+            avg_win_trade = get(won, ['pnl', 'average'])
+            avg_loss_trade = get(lost, ['pnl', 'average'])
+            
+            ratio_avg_win_loss = abs(avg_win_trade / avg_loss_trade) if avg_loss_trade != 0 else 0
+            
+            largest_win_value = get(won, ['pnl', 'max'])
+            largest_loss_value = get(lost, ['pnl', 'max']) # Usually negative, max magnitude
+
+            # 4. Calculate Max Win % (Requires iterating individual trades)
+            largest_win_percent = 0
+            largest_loss_percent = 0
+            
+            # Backtrader stores closed trades in _trades[data_feed][0]
+            # We iterate all feeds to find the max % win
+            if hasattr(strategy, '_trades'):
+                all_trades = []
+                for feed in strategy._trades:
+                    all_trades.extend(strategy._trades[feed][0]) # [0] is closed trades
+                
+                for t in all_trades:
+                    # Calculate ROI %: (PnL / (EntryPrice * Size)) * 100
+                    # Position Value = price * size
+                    investment = t.price * t.size
+                    if investment != 0:
+                        roi = (t.pnl / abs(investment)) * 100
+                        if roi > largest_win_percent: largest_win_percent = roi
+                        if roi < largest_loss_percent: largest_loss_percent = roi
+
+            return {
+                "total_closed": total_closed,
+                "total_open": total_open,
+                "total_won": total_won,
+                "total_lost": total_lost,
+                "win_rate": round(win_rate, 2),
+                
+                "long_trades_total": long_t.get('total', 0),
+                "long_trades_won": get(long_t, ['won', 'total']),
+                "short_trades_total": short_t.get('total', 0),
+                "short_trades_won": get(short_t, ['won', 'total']),
+
+                "gross_profit": round(gross_pnl, 2),
+                "net_profit": round(net_pnl, 2),
+                "avg_pnl": round(avg_pnl, 2),
+                
+                "avg_win": round(avg_win_trade, 2),
+                "avg_loss": round(avg_loss_trade, 2),
+                "ratio_avg_win_loss": round(ratio_avg_win_loss, 2),
+                
+                "largest_win_value": round(largest_win_value, 2),
+                "largest_loss_value": round(largest_loss_value, 2),
+                "largest_win_percent": round(largest_win_percent, 2),
+                "largest_loss_percent": round(largest_loss_percent, 2),
+            }
+        except Exception as e:
+            print(f"Error formatting trade analysis: {e}")
+            return {}
 
     def optimize(self, db: Session, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, method="grid", population_size=50, generations=10, progress_callback=None, abort_callback=None,
                  commission: float = 0.001, slippage: float = 0.0):

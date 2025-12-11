@@ -248,6 +248,7 @@ const Backtester: React.FC = () => {
     const [exchanges, setExchanges] = useState<string[]>([]);
     const [markets, setMarkets] = useState<string[]>([]);
     const [selectedExchange, setSelectedExchange] = useState('binance');
+    const [resultsTab, setResultsTab] = useState('overview');
     const [isLoadingMarkets, setIsLoadingMarkets] = useState(false);
     const [customStrategies, setCustomStrategies] = useState<string[]>([]);
 
@@ -1784,139 +1785,266 @@ const Backtester: React.FC = () => {
                                 </div>
 
                                 {/* B. Performance Summary Panel */}
-                                <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg">
+                                <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg animate-fade-in">
                                     {/* Header Tabs */}
-                                    <div className="flex border-b border-[#2A2E39] px-4 bg-[#1e222d]">
-                                        <button className="px-4 py-3 text-sm font-medium text-[#2962FF] border-b-2 border-[#2962FF] hover:bg-[#2A2E39] transition-colors">
+                                    <div className="flex border-b border-[#2A2E39] px-4 bg-[#1e222d] overflow-x-auto">
+                                        <button
+                                            onClick={() => setResultsTab('overview')}
+                                            className={`px-4 py-3 text-sm font-medium transition-colors ${resultsTab === 'overview' ? 'text-[#2962FF] border-b-2 border-[#2962FF]' : 'text-gray-400 hover:text-gray-200'}`}
+                                        >
                                             Overview
                                         </button>
-                                        <button className="px-4 py-3 text-sm font-medium text-gray-400 hover:text-gray-200 hover:bg-[#2A2E39] transition-colors">
+                                        <button
+                                            onClick={() => setResultsTab('performance')}
+                                            className={`px-4 py-3 text-sm font-medium transition-colors ${resultsTab === 'performance' ? 'text-[#2962FF] border-b-2 border-[#2962FF]' : 'text-gray-400 hover:text-gray-200'}`}
+                                        >
                                             Performance Summary
                                         </button>
-                                        <button className="px-4 py-3 text-sm font-medium text-gray-400 hover:text-gray-200 hover:bg-[#2A2E39] transition-colors">
+                                        {/* ✅ NEW TAB */}
+                                        <button
+                                            onClick={() => setResultsTab('traders_analysis')}
+                                            className={`px-4 py-3 text-sm font-medium transition-colors ${resultsTab === 'traders_analysis' ? 'text-[#2962FF] border-b-2 border-[#2962FF]' : 'text-gray-400 hover:text-gray-200'}`}
+                                        >
+                                            Traders Analysis
+                                        </button>
+                                        <button
+                                            onClick={() => setResultsTab('trades')}
+                                            className={`px-4 py-3 text-sm font-medium transition-colors ${resultsTab === 'trades' ? 'text-[#2962FF] border-b-2 border-[#2962FF]' : 'text-gray-400 hover:text-gray-200'}`}
+                                        >
                                             List of Trades
                                         </button>
                                     </div>
 
-                                    {/* Metrics Grid */}
-                                    <div className="p-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
+                                    {/* 1. OVERVIEW CONTENT */}
+                                    {resultsTab === 'overview' && (
+                                        <div className="p-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6 animate-fade-in">
+                                            {/* 1. Net Profit */}
+                                            <div className="flex flex-col">
+                                                <span className="text-xs text-gray-400 mb-1">Net Profit</span>
+                                                <div className="flex items-baseline gap-2">
+                                                    <span className={`text-xl font-bold font-mono ${singleResult.profitPercent && singleResult.profitPercent >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
+                                                        {singleResult.profitPercent && singleResult.profitPercent >= 0 ? '+' : ''}
+                                                        ${((singleResult.final_value || 0) - (singleResult.initial_cash || 10000)).toFixed(2)}
+                                                    </span>
+                                                    <span className={`text-xs ${singleResult.profitPercent && singleResult.profitPercent >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
+                                                        ({singleResult.profitPercent}%)
+                                                    </span>
+                                                </div>
+                                            </div>
 
-                                        {/* 1. Net Profit */}
-                                        <div className="flex flex-col">
-                                            <span className="text-xs text-gray-400 mb-1">Net Profit</span>
-                                            <div className="flex items-baseline gap-2">
-                                                <span className={`text-xl font-bold font-mono ${singleResult.profitPercent && singleResult.profitPercent >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
-                                                    {singleResult.profitPercent && singleResult.profitPercent >= 0 ? '+' : ''}
-                                                    ${((singleResult.final_value || 0) - (singleResult.initial_cash || 10000)).toFixed(2)}
+                                            {/* 2. Total Trades */}
+                                            <div className="flex flex-col">
+                                                <span className="text-xs text-gray-400 mb-1">Total Trades</span>
+                                                <span className="text-xl font-bold text-gray-100 font-mono">
+                                                    {singleResult.total_trades}
                                                 </span>
-                                                <span className={`text-xs ${singleResult.profitPercent && singleResult.profitPercent >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
-                                                    ({singleResult.profitPercent}%)
+                                            </div>
+
+                                            {/* 3. Percent Profitable */}
+                                            <div className="flex flex-col">
+                                                <span className="text-xs text-gray-400 mb-1">Percent Profitable</span>
+                                                <span className="text-xl font-bold text-gray-100 font-mono">
+                                                    {singleResult.winRate ? singleResult.winRate.toFixed(2) : singleResult.advanced_metrics?.win_rate?.toFixed(2)}%
+                                                </span>
+                                            </div>
+
+                                            {/* 4. Profit Factor */}
+                                            <div className="flex flex-col">
+                                                <span className="text-xs text-gray-400 mb-1">Profit Factor</span>
+                                                <span className="text-xl font-bold text-gray-100 font-mono">
+                                                    {singleResult.advanced_metrics?.profit_factor?.toFixed(2) || 'N/A'}
+                                                </span>
+                                            </div>
+
+                                            {/* 5. Max Drawdown */}
+                                            <div className="flex flex-col">
+                                                <span className="text-xs text-gray-400 mb-1">Max Drawdown</span>
+                                                <span className="text-xl font-bold text-[#F23645] font-mono">
+                                                    {singleResult.maxDrawdown?.toFixed(2)}%
+                                                </span>
+                                            </div>
+
+                                            {/* 6. Sharpe Ratio */}
+                                            <div className="flex flex-col">
+                                                <span className="text-xs text-gray-400 mb-1">Sharpe Ratio</span>
+                                                <span className="text-xl font-bold text-[#2962FF] font-mono">
+                                                    {singleResult.sharpeRatio?.toFixed(2)}
                                                 </span>
                                             </div>
                                         </div>
+                                    )}
 
-                                        {/* 2. Total Trades */}
-                                        <div className="flex flex-col">
-                                            <span className="text-xs text-gray-400 mb-1">Total Trades</span>
-                                            <span className="text-xl font-bold text-gray-100 font-mono">
-                                                {singleResult.total_trades}
-                                            </span>
+                                    {/* 2. TRADERS ANALYSIS CONTENT (NEW) */}
+                                    {resultsTab === 'traders_analysis' && singleResult.trade_analysis && (
+                                        <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-fade-in">
+
+                                            {/* Row 1: Totals */}
+                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39]">
+                                                <p className="text-gray-400 text-xs uppercase mb-1">Total Closed Trades</p>
+                                                <p className="text-2xl font-bold text-white">{singleResult.trade_analysis.total_closed}</p>
+                                            </div>
+                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39]">
+                                                <p className="text-gray-400 text-xs uppercase mb-1">Total Open Trades</p>
+                                                <p className="text-2xl font-bold text-white">{singleResult.trade_analysis.total_open}</p>
+                                            </div>
+                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39]">
+                                                <p className="text-gray-400 text-xs uppercase mb-1">Winning Trades</p>
+                                                <p className="text-2xl font-bold text-green-500">{singleResult.trade_analysis.total_won}</p>
+                                            </div>
+                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39]">
+                                                <p className="text-gray-400 text-xs uppercase mb-1">Losing Trades</p>
+                                                <p className="text-2xl font-bold text-red-500">{singleResult.trade_analysis.total_lost}</p>
+                                            </div>
+
+                                            {/* Row 2: Performance Ratios */}
+                                            <div className="col-span-1 md:col-span-2 bg-[#1e222d] p-4 rounded border border-[#2A2E39] flex justify-between items-center">
+                                                <div>
+                                                    <p className="text-gray-400 text-xs uppercase mb-1">Percent Profitable</p>
+                                                    <p className="text-2xl font-bold text-blue-400">{singleResult.trade_analysis.win_rate}%</p>
+                                                </div>
+                                                {/* Mini Progress Bar */}
+                                                <div className="w-24 h-2 bg-gray-700 rounded-full overflow-hidden">
+                                                    <div className="h-full bg-blue-500" style={{ width: `${singleResult.trade_analysis.win_rate}%` }}></div>
+                                                </div>
+                                            </div>
+
+                                            <div className="col-span-1 md:col-span-2 bg-[#1e222d] p-4 rounded border border-[#2A2E39] flex justify-between items-center">
+                                                <div>
+                                                    <p className="text-gray-400 text-xs uppercase mb-1">Ratio Avg Win / Avg Loss</p>
+                                                    <p className="text-2xl font-bold text-white">{singleResult.trade_analysis.ratio_avg_win_loss}</p>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-xs text-green-400">Avg Win: ${singleResult.trade_analysis.avg_win}</p>
+                                                    <p className="text-xs text-red-400">Avg Loss: ${singleResult.trade_analysis.avg_loss}</p>
+                                                </div>
+                                            </div>
+
+                                            {/* Row 3: Financials */}
+                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39]">
+                                                <p className="text-gray-400 text-xs uppercase mb-1">Gross Profit</p>
+                                                <p className="text-xl font-bold text-green-500">${singleResult.trade_analysis.gross_profit}</p>
+                                            </div>
+                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39]">
+                                                <p className="text-gray-400 text-xs uppercase mb-1">Net Profit</p>
+                                                <p className={`text-xl font-bold ${singleResult.trade_analysis.net_profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                                    ${singleResult.trade_analysis.net_profit}
+                                                </p>
+                                            </div>
+                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39]">
+                                                <p className="text-gray-400 text-xs uppercase mb-1">Avg Trade P&L</p>
+                                                <p className={`text-xl font-bold ${singleResult.trade_analysis.avg_pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                                    ${singleResult.trade_analysis.avg_pnl}
+                                                </p>
+                                            </div>
+                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39]">
+                                                <p className="text-gray-400 text-xs uppercase mb-1">Largest Win %</p>
+                                                <p className="text-xl font-bold text-green-500">+{singleResult.trade_analysis.largest_win_percent}%</p>
+                                            </div>
+
+                                            {/* Row 4: Long vs Short Breakdown */}
+                                            <div className="col-span-1 md:col-span-4 bg-[#1e222d] p-4 rounded border border-[#2A2E39]">
+                                                <p className="text-gray-400 text-xs uppercase mb-3 font-bold">Directional Performance</p>
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="flex justify-between items-center border-r border-gray-700 pr-4">
+                                                        <span className="text-sm font-medium text-gray-300">Long Trades</span>
+                                                        <div className="text-right">
+                                                            <span className="block text-lg font-bold text-white">
+                                                                {singleResult.trade_analysis.long_trades_won} / {singleResult.trade_analysis.long_trades_total}
+                                                            </span>
+                                                            <span className="text-xs text-gray-500">
+                                                                ({singleResult.trade_analysis.long_trades_total > 0
+                                                                    ? ((singleResult.trade_analysis.long_trades_won / singleResult.trade_analysis.long_trades_total) * 100).toFixed(1)
+                                                                    : 0}%) Win Rate
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex justify-between items-center pl-4">
+                                                        <span className="text-sm font-medium text-gray-300">Short Trades</span>
+                                                        <div className="text-right">
+                                                            <span className="block text-lg font-bold text-white">
+                                                                {singleResult.trade_analysis.short_trades_won} / {singleResult.trade_analysis.short_trades_total}
+                                                            </span>
+                                                            <span className="text-xs text-gray-500">
+                                                                ({singleResult.trade_analysis.short_trades_total > 0
+                                                                    ? ((singleResult.trade_analysis.short_trades_won / singleResult.trade_analysis.short_trades_total) * 100).toFixed(1)
+                                                                    : 0}%) Win Rate
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
+                                    )}
 
-                                        {/* 3. Percent Profitable */}
-                                        <div className="flex flex-col">
-                                            <span className="text-xs text-gray-400 mb-1">Percent Profitable</span>
-                                            <span className="text-xl font-bold text-gray-100 font-mono">
-                                                {singleResult.winRate ? singleResult.winRate.toFixed(2) : singleResult.advanced_metrics?.win_rate?.toFixed(2)}%
-                                            </span>
+                                    {/* 3. PERFORMANCE SUMMARY CONTENT (Matrix) */}
+                                    {resultsTab === 'performance' && (
+                                        <div className="bg-[#131722] animate-fade-in">
+                                            <div className="px-6 py-4 border-b border-[#2A2E39] bg-[#1e222d] flex items-center gap-2">
+                                                <Activity className="h-4 w-4 text-[#2962FF]" />
+                                                <h3 className="text-sm font-semibold text-gray-200">Key Metrics Matrix</h3>
+                                            </div>
+                                            <div className="p-0">
+                                                <table className="w-full text-sm text-left">
+                                                    <tbody>
+                                                        {singleResult.advanced_metrics && Object.entries(singleResult.advanced_metrics).map(([key, value], index) => (
+                                                            <tr key={key} className={`border-b border-[#2A2E39] last:border-0 ${index % 2 === 0 ? 'bg-[#1e222d]' : 'bg-[#131722]'}`}>
+                                                                <td className="px-6 py-3 text-gray-400 capitalize font-medium">
+                                                                    {key.replace(/_/g, ' ')}
+                                                                </td>
+                                                                <td className="px-6 py-3 text-right text-gray-100 font-mono">
+                                                                    {(typeof value === 'number') ? value.toFixed(2) : value}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
                                         </div>
+                                    )}
 
-                                        {/* 4. Profit Factor */}
-                                        <div className="flex flex-col">
-                                            <span className="text-xs text-gray-400 mb-1">Profit Factor</span>
-                                            <span className="text-xl font-bold text-gray-100 font-mono">
-                                                {singleResult.advanced_metrics?.profit_factor?.toFixed(2) || 'N/A'}
-                                            </span>
-                                        </div>
-
-                                        {/* 5. Max Drawdown */}
-                                        <div className="flex flex-col">
-                                            <span className="text-xs text-gray-400 mb-1">Max Drawdown</span>
-                                            <span className="text-xl font-bold text-[#F23645] font-mono">
-                                                {singleResult.maxDrawdown?.toFixed(2)}%
-                                            </span>
-                                        </div>
-
-                                        {/* 6. Sharpe Ratio */}
-                                        <div className="flex flex-col">
-                                            <span className="text-xs text-gray-400 mb-1">Sharpe Ratio</span>
-                                            <span className="text-xl font-bold text-[#2962FF] font-mono">
-                                                {singleResult.sharpeRatio?.toFixed(2)}
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* C. Detailed Matrix & Trade Log */}
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-                                    {/* Matrix Table */}
-                                    <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg">
-                                        <div className="px-6 py-4 border-b border-[#2A2E39] bg-[#1e222d] flex items-center gap-2">
-                                            <Activity className="h-4 w-4 text-[#2962FF]" />
-                                            <h3 className="text-sm font-semibold text-gray-200">Key Metrics Matrix</h3>
-                                        </div>
-                                        <div className="p-0">
-                                            <table className="w-full text-sm text-left">
-                                                <tbody>
-                                                    {singleResult.advanced_metrics && Object.entries(singleResult.advanced_metrics).map(([key, value], index) => (
-                                                        <tr key={key} className={`border-b border-[#2A2E39] last:border-0 ${index % 2 === 0 ? 'bg-[#1e222d]' : 'bg-[#131722]'}`}>
-                                                            <td className="px-6 py-3 text-gray-400 capitalize font-medium">
-                                                                {key.replace(/_/g, ' ')}
-                                                            </td>
-                                                            <td className="px-6 py-3 text-right text-gray-100 font-mono">
-                                                                {(typeof value === 'number') ? value.toFixed(2) : value}
-                                                            </td>
+                                    {/* 4. TRADE LIST CONTENT */}
+                                    {resultsTab === 'trades' && (
+                                        <div className="bg-[#131722] animate-fade-in flex flex-col h-[600px]">
+                                            <div className="px-6 py-4 border-b border-[#2A2E39] bg-[#1e222d] flex items-center gap-2">
+                                                <Layers className="h-4 w-4 text-[#2962FF]" />
+                                                <h3 className="text-sm font-semibold text-gray-200">Trade List</h3>
+                                            </div>
+                                            <div className="flex-1 overflow-auto custom-scrollbar">
+                                                <table className="w-full text-xs text-left">
+                                                    <thead className="bg-[#1e222d] text-gray-400 sticky top-0 z-10">
+                                                        <tr>
+                                                            <th className="px-4 py-2 bg-[#1e222d]">Type</th>
+                                                            <th className="px-4 py-2 bg-[#1e222d]">Price</th>
+                                                            <th className="px-4 py-2 bg-[#1e222d]">Size</th>
+                                                            <th className="px-4 py-2 bg-[#1e222d]">Time</th>
+                                                            <th className="px-4 py-2 text-right bg-[#1e222d]">P/L</th>
                                                         </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
+                                                    </thead>
+                                                    <tbody>
+                                                        {singleResult.trades_log?.map((trade: any, idx: number) => (
+                                                            <tr key={idx} className="border-b border-[#2A2E39] hover:bg-[#2A2E39] transition-colors">
+                                                                <td className={`px-4 py-2 font-bold ${trade.side === 'BUY' || trade.type === 'buy' ? 'text-[#089981]' : 'text-[#F23645]'}`}>
+                                                                    {trade.side || trade.type || (trade.size > 0 ? 'BUY' : 'SELL')}
+                                                                </td>
+                                                                <td className="px-4 py-2 font-mono text-gray-300">
+                                                                    {trade.price?.toFixed(2)}
+                                                                </td>
+                                                                <td className="px-4 py-2 font-mono text-gray-300">
+                                                                    {trade.size?.toFixed(4) || '-'}
+                                                                </td>
+                                                                <td className="px-4 py-2 font-mono text-gray-400">
+                                                                    {new Date(trade.time * 1000).toLocaleString()}
+                                                                </td>
+                                                                <td className={`px-4 py-2 text-right font-mono ${trade.pnl >= 0 ? 'text-[#089981]' : (trade.pnl < 0 ? 'text-[#F23645]' : 'text-gray-400')}`}>
+                                                                    {trade.pnl !== undefined ? trade.pnl.toFixed(2) : '-'}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
                                         </div>
-                                    </div>
-
-                                    {/* Trade Log Table */}
-                                    <div className="bg-[#131722] border border-[#2A2E39] rounded-lg overflow-hidden shadow-lg flex flex-col h-[400px]">
-                                        <div className="px-6 py-4 border-b border-[#2A2E39] bg-[#1e222d] flex items-center gap-2">
-                                            <Layers className="h-4 w-4 text-[#2962FF]" />
-                                            <h3 className="text-sm font-semibold text-gray-200">Trade List</h3>
-                                        </div>
-                                        <div className="flex-1 overflow-auto custom-scrollbar">
-                                            <table className="w-full text-xs text-left">
-                                                <thead className="bg-[#1e222d] text-gray-400 sticky top-0 z-10">
-                                                    <tr>
-                                                        <th className="px-4 py-2 bg-[#1e222d]">Type</th>
-                                                        <th className="px-4 py-2 bg-[#1e222d]">Price</th>
-                                                        <th className="px-4 py-2 text-right bg-[#1e222d]">P/L</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    {singleResult.trades_log?.map((trade: any, idx: number) => (
-                                                        <tr key={idx} className="border-b border-[#2A2E39] hover:bg-[#2A2E39] transition-colors">
-                                                            <td className={`px-4 py-2 font-bold ${trade.side === 'BUY' ? 'text-[#089981]' : 'text-[#F23645]'}`}>
-                                                                {trade.side || (trade.size > 0 ? 'BUY' : 'SELL')}
-                                                            </td>
-                                                            <td className="px-4 py-2 font-mono text-gray-300">
-                                                                {trade.price?.toFixed(2)}
-                                                            </td>
-                                                            <td className={`px-4 py-2 text-right font-mono ${trade.pnl >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
-                                                                {trade.pnl ? trade.pnl.toFixed(2) : '-'}
-                                                            </td>
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                    </div>
+                                    )}
                                 </div>
                             </div>
                         )}

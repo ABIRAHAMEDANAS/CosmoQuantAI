@@ -68,6 +68,28 @@ export interface BacktestMetrics {
   sharpe_ratio: number;
 }
 
+export interface TradeAnalysisMetrics {
+  total_closed: number;
+  total_open: number;
+  total_won: number;
+  total_lost: number;
+  win_rate: number;
+  long_trades_total: number;
+  long_trades_won: number;
+  short_trades_total: number;
+  short_trades_won: number;
+  gross_profit: number;
+  net_profit: number;
+  avg_pnl: number;
+  avg_win: number;
+  avg_loss: number;
+  ratio_avg_win_loss: number;
+  largest_win_value: number;
+  largest_loss_value: number;
+  largest_win_percent: number;
+  largest_loss_percent: number;
+}
+
 export interface BacktestResult {
   id?: string;
   market: string;
@@ -96,6 +118,7 @@ export interface BacktestResult {
 
   // New Metrics for TradingView Style Panel
   metrics?: BacktestMetrics;
+  trade_analysis?: TradeAnalysisMetrics;
 
   // ভিজ্যুয়ালাইজেশন ডেটা
   heatmap_data?: { year: number; month: number; value: number }[];
