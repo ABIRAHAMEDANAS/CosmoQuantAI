@@ -1815,60 +1815,69 @@ const Backtester: React.FC = () => {
                                         </button>
                                     </div>
 
-                                    {/* 1. OVERVIEW CONTENT */}
+                                    {/* ✅ OVERVIEW TAB CONTENT */}
                                     {resultsTab === 'overview' && (
                                         <div className="p-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6 animate-fade-in">
-                                            {/* 1. Net Profit */}
-                                            <div className="flex flex-col">
-                                                <span className="text-xs text-gray-400 mb-1">Net Profit</span>
+
+                                            {/* 1. Net Profit (Total P&L) - NEW */}
+                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39] flex flex-col justify-center">
+                                                <span className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Total P&L</span>
                                                 <div className="flex items-baseline gap-2">
-                                                    <span className={`text-xl font-bold font-mono ${singleResult.profitPercent && singleResult.profitPercent >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
-                                                        {singleResult.profitPercent && singleResult.profitPercent >= 0 ? '+' : ''}
-                                                        ${((singleResult.final_value || 0) - (singleResult.initial_cash || 10000)).toFixed(2)}
-                                                    </span>
-                                                    <span className={`text-xs ${singleResult.profitPercent && singleResult.profitPercent >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
-                                                        ({singleResult.profitPercent}%)
+                                                    <span className={`text-xl font-bold font-mono ${(singleResult.trade_analysis?.net_profit || 0) >= 0 ? 'text-[#089981]' : 'text-[#F23645]'
+                                                        }`}>
+                                                        ${singleResult.trade_analysis?.net_profit?.toFixed(2) ?? '0.00'}
                                                     </span>
                                                 </div>
-                                            </div>
-
-                                            {/* 2. Total Trades */}
-                                            <div className="flex flex-col">
-                                                <span className="text-xs text-gray-400 mb-1">Total Trades</span>
-                                                <span className="text-xl font-bold text-gray-100 font-mono">
-                                                    {singleResult.total_trades}
+                                                <span className={`text-[10px] ${(singleResult.profitPercent || 0) >= 0 ? 'text-[#089981]' : 'text-[#F23645]'}`}>
+                                                    {singleResult.profitPercent?.toFixed(2)}% Return
                                                 </span>
                                             </div>
 
-                                            {/* 3. Percent Profitable */}
-                                            <div className="flex flex-col">
-                                                <span className="text-xs text-gray-400 mb-1">Percent Profitable</span>
-                                                <span className="text-xl font-bold text-gray-100 font-mono">
-                                                    {singleResult.winRate ? singleResult.winRate.toFixed(2) : singleResult.advanced_metrics?.win_rate?.toFixed(2)}%
+                                            {/* 2. Gross Profit - NEW */}
+                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39] flex flex-col justify-center">
+                                                <span className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Gross Profit</span>
+                                                <span className="text-xl font-bold text-[#089981] font-mono">
+                                                    ${singleResult.trade_analysis?.gross_profit?.toFixed(2) ?? '0.00'}
                                                 </span>
                                             </div>
 
-                                            {/* 4. Profit Factor */}
-                                            <div className="flex flex-col">
-                                                <span className="text-xs text-gray-400 mb-1">Profit Factor</span>
-                                                <span className="text-xl font-bold text-gray-100 font-mono">
-                                                    {singleResult.advanced_metrics?.profit_factor?.toFixed(2) || 'N/A'}
-                                                </span>
-                                            </div>
-
-                                            {/* 5. Max Drawdown */}
-                                            <div className="flex flex-col">
-                                                <span className="text-xs text-gray-400 mb-1">Max Drawdown</span>
+                                            {/* 3. Max Equity Drawdown - FIXED & NEW */}
+                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39] flex flex-col justify-center">
+                                                <span className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Max Equity DD</span>
                                                 <span className="text-xl font-bold text-[#F23645] font-mono">
-                                                    {singleResult.maxDrawdown?.toFixed(2)}%
+                                                    {/* Fallback check: root value OR advanced_metrics value */}
+                                                    {singleResult.maxDrawdown
+                                                        ? singleResult.maxDrawdown.toFixed(2)
+                                                        : singleResult.advanced_metrics?.max_drawdown?.toFixed(2) ?? '0.00'}%
                                                 </span>
                                             </div>
 
-                                            {/* 6. Sharpe Ratio */}
-                                            <div className="flex flex-col">
-                                                <span className="text-xs text-gray-400 mb-1">Sharpe Ratio</span>
+                                            {/* 4. Sharpe Ratio - FIXED */}
+                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39] flex flex-col justify-center">
+                                                <span className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Sharpe Ratio</span>
                                                 <span className="text-xl font-bold text-[#2962FF] font-mono">
-                                                    {singleResult.sharpeRatio?.toFixed(2)}
+                                                    {/* Fallback check: root value OR advanced_metrics value (using 'sharpe' key) */}
+                                                    {singleResult.sharpeRatio
+                                                        ? singleResult.sharpeRatio.toFixed(2)
+                                                        : singleResult.advanced_metrics?.sharpe?.toFixed(2) ?? '0.00'}
+                                                </span>
+                                            </div>
+
+                                            {/* 5. Profit Factor */}
+                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39] flex flex-col justify-center">
+                                                <span className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Profit Factor</span>
+                                                <span className="text-xl font-bold text-gray-100 font-mono">
+                                                    {singleResult.advanced_metrics?.profit_factor?.toFixed(2) ?? 'N/A'}
+                                                </span>
+                                            </div>
+
+                                            {/* 6. Win Rate */}
+                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39] flex flex-col justify-center">
+                                                <span className="text-xs text-gray-400 mb-1 uppercase tracking-wider">Win Rate</span>
+                                                <span className="text-xl font-bold text-gray-100 font-mono">
+                                                    {singleResult.trade_analysis?.win_rate
+                                                        ? singleResult.trade_analysis.win_rate.toFixed(2)
+                                                        : (singleResult.winRate || 0).toFixed(2)}%
                                                 </span>
                                             </div>
                                         </div>
