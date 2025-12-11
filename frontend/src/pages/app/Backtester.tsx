@@ -1878,15 +1878,43 @@ const Backtester: React.FC = () => {
                                     {resultsTab === 'traders_analysis' && singleResult.trade_analysis && (
                                         <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-fade-in">
 
-                                            {/* Row 1: Totals */}
-                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39]">
-                                                <p className="text-gray-400 text-xs uppercase mb-1">Total Closed Trades</p>
-                                                <p className="text-2xl font-bold text-white">{singleResult.trade_analysis.total_closed}</p>
+                                            {/* Row 1: Trade Counts Breakdown (UPDATED) */}
+                                            <div className="col-span-1 md:col-span-2 lg:col-span-4 grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                                                {/* Total Trades */}
+                                                <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39] flex flex-col justify-center items-center relative overflow-hidden group">
+                                                    <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                                                    <p className="text-gray-400 text-xs uppercase mb-1 font-semibold tracking-wider">Total Closed Trades</p>
+                                                    <p className="text-3xl font-bold text-white">{singleResult.trade_analysis.total_closed}</p>
+                                                    <p className="text-[10px] text-gray-500 mt-1">100% of Portfolio Activity</p>
+                                                </div>
+
+                                                {/* Long Trades */}
+                                                <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39] flex flex-col justify-center items-center relative overflow-hidden group">
+                                                    <div className="absolute top-0 left-0 w-1 h-full bg-green-500"></div>
+                                                    <p className="text-gray-400 text-xs uppercase mb-1 font-semibold tracking-wider">Total Long Trades</p>
+                                                    <p className="text-3xl font-bold text-green-400">{singleResult.trade_analysis.long_trades_total}</p>
+                                                    <p className="text-[10px] text-gray-500 mt-1">
+                                                        Win Rate: {singleResult.trade_analysis.long_trades_total > 0
+                                                            ? ((singleResult.trade_analysis.long_trades_won / singleResult.trade_analysis.long_trades_total) * 100).toFixed(1)
+                                                            : 0}%
+                                                    </p>
+                                                </div>
+
+                                                {/* Short Trades */}
+                                                <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39] flex flex-col justify-center items-center relative overflow-hidden group">
+                                                    <div className="absolute top-0 left-0 w-1 h-full bg-red-500"></div>
+                                                    <p className="text-gray-400 text-xs uppercase mb-1 font-semibold tracking-wider">Total Short Trades</p>
+                                                    <p className="text-3xl font-bold text-red-400">{singleResult.trade_analysis.short_trades_total}</p>
+                                                    <p className="text-[10px] text-gray-500 mt-1">
+                                                        Win Rate: {singleResult.trade_analysis.short_trades_total > 0
+                                                            ? ((singleResult.trade_analysis.short_trades_won / singleResult.trade_analysis.short_trades_total) * 100).toFixed(1)
+                                                            : 0}%
+                                                    </p>
+                                                </div>
                                             </div>
-                                            <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39]">
-                                                <p className="text-gray-400 text-xs uppercase mb-1">Total Open Trades</p>
-                                                <p className="text-2xl font-bold text-white">{singleResult.trade_analysis.total_open}</p>
-                                            </div>
+
+                                            {/* Row 2: Win/Loss Counts */}
                                             <div className="bg-[#1e222d] p-4 rounded border border-[#2A2E39]">
                                                 <p className="text-gray-400 text-xs uppercase mb-1">Winning Trades</p>
                                                 <p className="text-2xl font-bold text-green-500">{singleResult.trade_analysis.total_won}</p>

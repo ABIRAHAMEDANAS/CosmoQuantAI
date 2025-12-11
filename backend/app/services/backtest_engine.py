@@ -42,10 +42,15 @@ class FractionalPercentSizer(bt.Sizer):
         ('percents', 90),
     )
     def _getsizing(self, comminfo, cash, data, isbuy):
-        if isbuy:
+        position = self.broker.getposition(data)
+        
+        # যদি কোনো পজিশন না থাকে (Flat), তাহলে নতুন ট্রেড ওপেন করার জন্য সাইজ ক্যালকুলেট করুন
+        # এটি Long (Buy) এবং Short (Sell) উভয়ের জন্যই কাজ করবে
+        if position.size == 0:
             size = self.broker.get_value() * (self.params.percents / 100) / data.close[0]
             return size
-        position = self.broker.getposition(data)
+            
+        # যদি পজিশন থাকে, তবে তা ক্লোজ করার জন্য বর্তমান সাইজ রিটার্ন করুন
         return position.size
 
 class BacktestEngine:
