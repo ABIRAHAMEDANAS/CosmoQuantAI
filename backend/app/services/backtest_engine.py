@@ -24,23 +24,11 @@ market_service = MarketService()
 
 import logging
 
-# ✅ 0. Silence Other Loggers (অপ্রয়োজনীয় লগ বন্ধ করা)
+# ✅ SAFE LOGGING CONFIGURATION
+# শুধুমাত্র Warning বা Error লেভেলের লগ দেখাবে, ইনফো লগ হাইড করবে।
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
 logging.getLogger('backtrader').setLevel(logging.WARNING)
 
-# ✅ 1. Context Manager to Suppress Unwanted Output (সব প্রিন্ট গিলে ফেলার জন্য)
-class SuppressStdout:
-    def __enter__(self):
-        self._original_stdout = sys.stdout
-        self._original_stderr = sys.stderr
-        sys.stdout = open(os.devnull, 'w')
-        sys.stderr = open(os.devnull, 'w')
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        sys.stdout.close()
-        sys.stderr.close()
-        sys.stdout = self._original_stdout
-        sys.stderr = self._original_stderr
 
 # ✅ 2. Smart Terminal Progress Bar (সরাসরি টার্মিনালে প্রিন্ট করার জন্য)
 class SmartProgressBar:
@@ -286,7 +274,9 @@ class BacktestEngine:
             executed_trades.sort(key=lambda x: x['time'])
         
         df['time'] = df.index.astype('int64') // 10**9 
-        chart_candles = df[['time', 'open', 'high', 'low', 'close', 'volume']].to_dict(orient='records')
+        # ✅ NEW Code (Optimized Array):
+        # Format: [time, open, high, low, close, volume]
+        chart_candles = df[['time', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
         
         # Extract Equity Curve
         equity_curve = []
@@ -447,9 +437,8 @@ class BacktestEngine:
                     break
                 instance_params = dict(zip(param_names, combo))
                 
-                # ✅ SUPPRESS OUTPUT HERE (সব আউটপুট হাইড করা হচ্ছে)
-                with SuppressStdout():
-                    metrics = self._run_single_backtest(df, strategy_name, initial_cash, instance_params, fixed_params, commission, slippage)
+                # ✅ NEW: সরাসরি কল করুন (কারণ আমরা Cerebro তে stdstats=False দিয়েছি)
+                metrics = self._run_single_backtest(df, strategy_name, initial_cash, instance_params, fixed_params, commission, slippage)
                 
                 metrics['params'] = instance_params
                 results.append(metrics)
@@ -494,14 +483,13 @@ class BacktestEngine:
             for i, individual in enumerate(population):
                 param_signature = json.dumps(individual, sort_keys=True)
                 
-                # ✅ SUPPRESS OUTPUT HERE
-                with SuppressStdout():
-                    if param_signature in history_cache:
-                        metrics = history_cache[param_signature]
-                    else:
-                        metrics = self._run_single_backtest(df, strategy_name, initial_cash, individual, fixed_params, commission, slippage)
-                        metrics['params'] = individual
-                        history_cache[param_signature] = metrics
+                # ✅ NEW: সরাসরি লজিক ব্যবহার করুন
+                if param_signature in history_cache:
+                    metrics = history_cache[param_signature]
+                else:
+                    metrics = self._run_single_backtest(df, strategy_name, initial_cash, individual, fixed_params, commission, slippage)
+                    metrics['params'] = individual
+                    history_cache[param_signature] = metrics
                 
                 evaluated_pop.append(metrics)
                 current_step = (gen * pop_size) + (i + 1)
@@ -544,9 +532,9 @@ class BacktestEngine:
                 try: clean_params[k] = float(v)
                 except: clean_params[k] = v
 
-        cerebro = bt.Cerebro()
-        # এখানে stdstats=False দিলে ডিফল্ট অবজারভার প্রিন্ট বন্ধ হবে যা টার্মিনাল ক্লিন রাখবে
-        # cerebro = bt.Cerebro(stdstats=False) 
+        # ✅ FIX: stdstats=False ব্যবহার করুন (Stdout হাইজ্যাক করার বদলে)
+        # এটি ডিফল্ট প্রিন্ট বা observer আউটপুট বন্ধ রাখবে, কিন্তু এরর দেখাবে।
+        cerebro = bt.Cerebro(stdstats=False) 
         
         data_feed = bt.feeds.PandasData(dataname=df)
         cerebro.adddata(data_feed)
