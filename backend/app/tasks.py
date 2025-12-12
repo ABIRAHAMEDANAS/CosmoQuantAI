@@ -8,6 +8,21 @@ from . import utils
 from app.strategies import STRATEGY_MAP
 from app.services.live_engine import LiveBotEngine
 import asyncio
+import json
+
+def publish_task_status(task_type, task_id, status, progress, data=None):
+    try:
+        r = utils.get_redis_client()
+        message = {
+            "task_type": task_type,
+            "task_id": task_id,
+            "status": status,
+            "progress": progress,
+            "data": data
+        }
+        r.publish("task_updates", json.dumps(message, default=str))
+    except Exception as e:
+        print(f"⚠️ Redis Publish Error: {e}")
 
 # ✅ নতুন হেল্পার ফাংশন: NaN চেক করার জন্য
 def clean_metric(value):
@@ -60,10 +75,14 @@ def run_backtest_task(self, symbol: str, timeframe: str, strategy_name: str, ini
                 state='PROGRESS',
                 meta={'percent': percent, 'status': 'Running Strategy...'}
             )
+            # Unified Update
+            publish_task_status('BACKTEST', self.request.id, 'processing', percent)
+
             if percent % 10 == 0:
                 print(f"⏳ Backtest Progress: {percent}%", flush=True)
 
     try:
+        publish_task_status('BACKTEST', self.request.id, 'processing', 0)
         result = engine.run(
             db=db,
             symbol=symbol,
@@ -83,11 +102,13 @@ def run_backtest_task(self, symbol: str, timeframe: str, strategy_name: str, ini
             trailing_stop=trailing_stop
         )
         print_pretty_result(result)
+        publish_task_status('BACKTEST', self.request.id, 'completed', 100, result)
         return result
         
     except Exception as e:
         import traceback
         print(f"❌ Backtest Error Traceback:\n{traceback.format_exc()}", flush=True)
+        publish_task_status('BACKTEST', self.request.id, 'failed', 0, {"error": str(e)})
         return {"status": "error", "message": str(e)}
         
     finally:
@@ -117,6 +138,7 @@ def run_optimization_task(self, symbol: str, timeframe: str, strategy_name: str,
                 'status': 'Processing'
             }
         )
+        publish_task_status('OPTIMIZE', self.request.id, 'processing', percent)
 
     def check_abort():
         try:
@@ -151,10 +173,12 @@ def run_optimization_task(self, symbol: str, timeframe: str, strategy_name: str,
             r.delete(f"abort_task:{self.request.id}")
         except: pass
 
+        publish_task_status('OPTIMIZE', self.request.id, 'completed', 100, results)
         return results
         
     except Exception as e:
         print(f"❌ Optimization Error: {e}", flush=True)
+        publish_task_status('OPTIMIZE', self.request.id, 'failed', 0, {"error": str(e)})
         return {"status": "error", "message": str(e)}
         
     finally:
@@ -201,6 +225,7 @@ def run_batch_backtest_task(self, symbol: str, timeframe: str, initial_cash: flo
                 'status': f"Testing {strategy_name}..."
             }
         )
+        publish_task_status('BATCH', self.request.id, 'processing', current_progress)
         
         time.sleep(0.1) 
 
@@ -244,13 +269,15 @@ def run_batch_backtest_task(self, symbol: str, timeframe: str, initial_cash: flo
     
     print(f"✅ Batch Task Completed! Scanned {len(results)} strategies.")
 
-    return {
+    final_result = {
         "status": "completed",
         "symbol": symbol,
         "total_tested": total,
         "results": results,
         "errors": errors
     }
+    publish_task_status('BATCH', self.request.id, 'completed', 100, final_result)
+    return final_result
 
 # ✅ নতুন লাইভ বট টাস্ক
 @celery_app.task(bind=True)
@@ -447,6 +474,7 @@ def download_candles_task(self, exchange_id, symbol, timeframe, start_date, end_
                         
                         progress_pct = min(100, int(((current_ts - start_ts) / total_duration) * 100))
                         self.update_state(state='PROGRESS', meta={'percent': progress_pct, 'status': 'Downloading...'})
+                        publish_task_status('DOWNLOAD', self.request.id, 'processing', progress_pct)
                         
                         if current_ts >= end_ts: break
                         
@@ -455,6 +483,7 @@ def download_candles_task(self, exchange_id, symbol, timeframe, start_date, end_
                         time.sleep(2) # এরর হলে একটু অপেক্ষা
                         continue
 
+        publish_task_status('DOWNLOAD', self.request.id, 'completed', 100, {"filename": filename})
         return {"status": "completed", "filename": filename}
 
     except Exception as e:
@@ -544,6 +573,7 @@ def download_trades_task(self, exchange_id, symbol, start_date, end_date=None):
                         
                         progress_pct = min(100, int(((current_ts - start_ts) / total_duration) * 100))
                         self.update_state(state='PROGRESS', meta={'percent': progress_pct, 'status': 'Fetching Trades...'})
+                        publish_task_status('DOWNLOAD', self.request.id, 'processing', progress_pct)
                         
                         if current_ts >= end_ts: break
                         
@@ -552,6 +582,7 @@ def download_trades_task(self, exchange_id, symbol, start_date, end_date=None):
                         time.sleep(2)
                         continue
                     
+        publish_task_status('DOWNLOAD', self.request.id, 'completed', 100, {"filename": filename})
         return {"status": "completed", "filename": filename}
 
     except Exception as e:

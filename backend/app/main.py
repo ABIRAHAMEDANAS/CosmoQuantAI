@@ -73,6 +73,32 @@ async def subscribe_to_redis_logs():
     finally:
         await redis.close()
 
+async def subscribe_to_task_updates():
+    print("📡 Listening to Redis Task Updates...")
+    redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    pubsub = redis.pubsub()
+    await pubsub.subscribe("task_updates")
+
+    try:
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                try:
+                    data = json.loads(message["data"])
+                    # data expected format: { "task_type":..., "task_id":..., "status":..., "progress":..., "data":... }
+                    await manager.broadcast_status(
+                        task_type=data.get("task_type"),
+                        task_id=data.get("task_id"),
+                        status=data.get("status"),
+                        progress=data.get("progress"),
+                        data=data.get("data")
+                    )
+                except Exception as e:
+                    print(f"Task Update Forward Error: {e}")
+    except asyncio.CancelledError:
+        print("Task Update Subscriber Cancelled.")
+    finally:
+        await redis.close()
+
 async def fetch_market_data_background():
     local_exchange_client = None
     print("🚀 Background Market Data Task Started")
@@ -146,6 +172,11 @@ async def startup_event():
     running_tasks.add(log_task)
     log_task.add_done_callback(running_tasks.discard)
 
+    # Task C: Task Updates (Unified WebSocket)
+    task_update_task = asyncio.create_task(subscribe_to_task_updates())
+    running_tasks.add(task_update_task)
+    task_update_task.add_done_callback(running_tasks.discard)
+
 @app.on_event("shutdown")
 async def shutdown_event():
     print("🛑 Server Shutdown Initiated...")
@@ -186,3 +217,11 @@ async def websocket_general(websocket: WebSocket):
         while True: await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket, "general")
+
+@app.websocket("/ws/backtest")
+async def websocket_backtest(websocket: WebSocket):
+    await manager.connect(websocket, "backtest")
+    try:
+        while True: await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, "backtest")

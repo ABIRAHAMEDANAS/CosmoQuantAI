@@ -16,9 +16,15 @@ import importlib.util
 import sys
 import asyncio
 import time
+from asgiref.sync import async_to_sync
+
+import warnings
 
 # QuantStats setup
 qs.extend_pandas()
+
+# Suppress QuantStats RuntimeWarnings (e.g. invalid value in scalar power)
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="quantstats")
 
 market_service = MarketService()
 
@@ -148,9 +154,9 @@ class BacktestEngine:
                 print(f"📉 Data missing for {symbol} {timeframe}. Auto-syncing from Exchange...")
                 if progress_callback: progress_callback(5)
                 try:
-                    asyncio.run(market_service.fetch_and_store_candles(
+                    async_to_sync(market_service.fetch_and_store_candles)(
                         db=db, symbol=symbol, timeframe=timeframe, start_date=start_date, end_date=end_date, limit=1000
-                    ))
+                    )
                     candles = market_service.get_candles_from_db(db, symbol, timeframe, start_date, end_date)
                 except Exception as e:
                     print(f"❌ Auto-sync failed: {e}")
@@ -390,9 +396,9 @@ class BacktestEngine:
             print(f"Data missing for {symbol} {timeframe}. Auto-syncing...")
             if progress_callback: progress_callback(0, 100)
             try:
-                asyncio.run(market_service.fetch_and_store_candles(
+                async_to_sync(market_service.fetch_and_store_candles)(
                     db=db, symbol=symbol, timeframe=timeframe, start_date=start_date, end_date=end_date, limit=1000
-                ))
+                )
                 candles = market_service.get_candles_from_db(db, symbol, timeframe, start_date, end_date)
             except Exception as e:
                 print(f"Auto-sync failed: {e}")

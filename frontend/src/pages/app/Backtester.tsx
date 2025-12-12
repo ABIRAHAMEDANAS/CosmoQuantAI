@@ -13,6 +13,7 @@ import type { BacktestResult, Timeframe } from '@/types';
 
 import { useToast } from '@/context/ToastContext';
 import { syncMarketData, runBacktestApi, runOptimizationApi, getBacktestStatus, getExchangeList, getExchangeMarkets, uploadStrategyFile, generateStrategy, fetchCustomStrategyList, fetchStrategyCode, revokeBacktestTask, uploadBacktestDataFile, downloadCandles, downloadTrades, getDownloadStatus, runBatchBacktest, getTaskStatus, fetchStandardStrategyParams, fetchTradeFiles } from '@/services/backtester';
+import { useBacktestSocket } from '../../hooks/useBacktestSocket';
 import { useBacktest } from '@/context/BacktestContext';
 import { AIFoundryIcon } from '@/constants';
 import SearchableSelect from '@/components/common/SearchableSelect';
@@ -402,7 +403,125 @@ const Backtester: React.FC = () => {
     // ✅ Running States
     const [isDownloading, setIsDownloading] = useState(false);
     const [downloadProgress, setDownloadProgress] = useState(0);
-    const [activeTaskId, setActiveTaskId] = useState<string | null>(null); // ✅ টাস্ক আইডি ট্র্যাক করার জন্য
+    const [activeTaskId, setActiveTaskId] = useState<string | null>(null); // Shared active task ID (Download)
+    const [backtestTaskId, setBacktestTaskId] = useState<string | null>(null); // ✅ New: Track Backtest Task
+    const [optimizationTaskId, setOptimizationTaskId] = useState<string | null>(null); // ✅ New: Track Optimization Task
+    const [batchTaskId, setBatchTaskId] = useState<string | null>(null); // ✅ New: Track Batch Task
+
+    // ✅ WebSocket Hook Integration
+    const { isConnected, lastMessage } = useBacktestSocket();
+
+    // ✅ Unified WebSocket Event Listener
+    useEffect(() => {
+        if (!lastMessage) return;
+
+        // 1. Backtest Updates
+        if (lastMessage.type === 'BACKTEST' && backtestTaskId && lastMessage.task_id === backtestTaskId) {
+            if (lastMessage.status === 'processing') {
+                setProgress(lastMessage.progress);
+            }
+            if (lastMessage.status === 'completed') {
+                setBacktestResult(lastMessage.payload);
+                setSingleResult(lastMessage.payload);
+                setIsRunning(false);
+                setProgress(100);
+                setShowResults(true);
+                showToast('Backtest Completed!', 'success');
+                setBacktestTaskId(null);
+            }
+            if (lastMessage.status === 'failed') {
+                setIsRunning(false);
+                showToast(`Backtest Failed: ${lastMessage.payload?.error || 'Unknown error'}`, 'error');
+                setBacktestTaskId(null);
+            }
+        }
+
+        // 2. Optimization Updates
+        if (lastMessage.type === 'OPTIMIZE' && optimizationTaskId && lastMessage.task_id === optimizationTaskId) {
+            if (lastMessage.status === 'processing') {
+                setOptimizationProgress(lastMessage.progress);
+            }
+            if (lastMessage.status === 'completed') {
+                setIsOptimizing(false);
+                setOptimizationProgress(100);
+                localStorage.removeItem('activeOptimizationId');
+
+                // Process Results
+                const rawResults = lastMessage.payload;
+                // Ensure array format as per previous logic (map raw to formatted)
+                const formattedResults: BacktestResult[] = Array.isArray(rawResults) ? rawResults.map((res: any, index: number) => ({
+                    id: `opt-${index}`,
+                    market: symbol || 'BTC/USDT',
+                    strategy: strategy,
+                    timeframe: timeframe,
+                    date: endDate,
+                    profitPercent: res.profitPercent,
+                    maxDrawdown: res.maxDrawdown,
+                    winRate: res.winRate || 0,
+                    sharpeRatio: res.sharpeRatio,
+                    profit_percent: res.profitPercent,
+                    params: res.params,
+                    total_trades: res.total_trades || 0
+                })) : [];
+
+                if (isMultiObjectiveEnabled) setMultiObjectiveResults(formattedResults);
+                else setBatchResults(formattedResults);
+
+                setShowResults(true);
+                showToast('Optimization Completed!', 'success');
+                setOptimizationTaskId(null);
+            }
+            if (lastMessage.status === 'failed') {
+                setIsOptimizing(false);
+                localStorage.removeItem('activeOptimizationId');
+                showToast(`Optimization Failed: ${lastMessage.payload?.error}`, 'error');
+                setOptimizationTaskId(null);
+            }
+        }
+
+        // 3. Batch Updates
+        if (lastMessage.type === 'BATCH' && batchTaskId && lastMessage.task_id === batchTaskId) {
+            if (lastMessage.status === 'processing') {
+                setBatchProgress(lastMessage.progress);
+                setBatchStatusMsg(`Processing... (${lastMessage.progress}%)`);
+            }
+            if (lastMessage.status === 'completed') {
+                setIsBatchRunning(false);
+                setBatchProgress(100);
+                setBatchStatusMsg("✅ Batch Test Completed!");
+                setBatchResults(lastMessage.payload?.results || []); // Assuming payload is the final result dict
+                setShowResults(true);
+                showToast('Batch Analysis Completed!', 'success');
+                setBatchTaskId(null);
+            }
+            if (lastMessage.status === 'failed') {
+                setIsBatchRunning(false);
+                setBatchStatusMsg("❌ Batch Test Failed");
+                showToast(`Batch Failed: ${lastMessage.payload?.error}`, 'error');
+                setBatchTaskId(null);
+            }
+        }
+
+        // 4. Download Updates (Task Type: DOWNLOAD)
+        if (lastMessage.type === 'DOWNLOAD' && activeTaskId && lastMessage.task_id === activeTaskId) {
+            if (lastMessage.status === 'processing') {
+                setDownloadProgress(lastMessage.progress);
+            }
+            if (lastMessage.status === 'completed') {
+                setIsDownloading(false);
+                setDownloadProgress(100);
+                setActiveTaskId(null);
+                showToast('Download Completed Successfully! 🎉', 'success');
+            }
+            if (lastMessage.status === 'failed' || lastMessage.status === 'Revoked') {  // Revoked case?
+                setIsDownloading(false);
+                setActiveTaskId(null);
+                showToast(lastMessage.status === 'Revoked' ? 'Download Stopped' : 'Download Failed', 'error');
+            }
+        }
+
+    }, [lastMessage, backtestTaskId, optimizationTaskId, batchTaskId, activeTaskId, symbol, strategy, timeframe, endDate, isMultiObjectiveEnabled]);
+
 
     // ✅ Data Conversion Handler
     const [isConverting, setIsConverting] = useState(false);
@@ -505,47 +624,8 @@ const Backtester: React.FC = () => {
 
             const taskId = res.task_id;
             setActiveTaskId(taskId);
+            // WebSocket listener will handle updates via activeTaskId
 
-            // ✅ পোলিং লুপ ফিক্স
-            const interval = setInterval(async () => {
-                try {
-                    const status = await getDownloadStatus(taskId);
-                    console.log("Download Status:", status); // ডিবাগিং এর জন্য
-
-                    if (status.status === 'Processing') {
-                        setDownloadProgress(status.percent);
-                    }
-                    else if (status.status === 'Completed') {
-                        clearInterval(interval);
-                        setIsDownloading(false);
-                        setDownloadProgress(100);
-                        setActiveTaskId(null);
-                        showToast('Download Completed Successfully! 🎉', 'success');
-                    }
-                    // ✅ ফিক্স: স্টপ বাটন বা ফেইল হলে লুপ থামানো
-                    else if (
-                        status.status === 'Failed' ||
-                        status.status === 'Revoked' ||
-                        status.status === 'REVOKED' // সার্ভার থেকে বড় হাতের আসলেও ধরবে
-                    ) {
-                        clearInterval(interval);
-                        setIsDownloading(false); // এটি মডাল ক্লোজ বাটনকে সচল করবে
-                        setActiveTaskId(null);
-
-                        if (status.status === 'Revoked' || status.status === 'REVOKED') {
-                            showToast('Download Stopped by User.', 'info');
-                        } else {
-                            showToast(`Download Failed: ${status.error}`, 'error');
-                        }
-                    }
-                } catch (e) {
-                    // নেটওয়ার্ক এরর হলে লুপ থামিয়ে দেওয়া ভালো
-                    console.error("Polling Error", e);
-                    clearInterval(interval);
-                    setIsDownloading(false);
-                    setActiveTaskId(null);
-                }
-            }, 1000);
 
         } catch (e) {
             console.error(e);
@@ -857,50 +937,10 @@ const Backtester: React.FC = () => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
-    // Polling Logic
+    // Polling Logic - Replaced with WebSocket Setup
     const pollOptimizationStatus = useCallback((taskId: string) => {
-        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-        const pollInterval = setInterval(async () => {
-            try {
-                const statusData = await getBacktestStatus(taskId);
-                if (statusData.percent) setOptimizationProgress(statusData.percent);
-
-                if (statusData.status === 'Completed') {
-                    clearInterval(pollInterval);
-                    setIsOptimizing(false);
-                    setOptimizationProgress(100);
-                    localStorage.removeItem('activeOptimizationId');
-                    const rawResults = statusData.result;
-                    const formattedResults: BacktestResult[] = rawResults.map((res: any, index: number) => ({
-                        id: `opt-${index}`,
-                        market: symbol || 'BTC/USDT',
-                        strategy: strategy,
-                        timeframe: timeframe,
-                        date: endDate,
-                        profitPercent: res.profitPercent,
-                        maxDrawdown: res.maxDrawdown,
-                        winRate: res.winRate || 0,
-                        sharpeRatio: res.sharpeRatio,
-                        profit_percent: res.profitPercent,
-                        params: res.params,
-                        total_trades: res.total_trades || 0
-                    }));
-
-                    if (isMultiObjectiveEnabled) setMultiObjectiveResults(formattedResults);
-                    else setBatchResults(formattedResults);
-
-                    setShowResults(true);
-                    showToast('Optimization Completed!', 'success');
-                } else if (statusData.status === 'Failed') {
-                    clearInterval(pollInterval);
-                    setIsOptimizing(false);
-                    localStorage.removeItem('activeOptimizationId');
-                    showToast(`Failed: ${statusData.error}`, 'error');
-                }
-            } catch (err) { console.error(err); }
-        }, 2000);
-        pollIntervalRef.current = pollInterval;
-    }, [symbol, strategy, timeframe, endDate, isMultiObjectiveEnabled, showToast]);
+        setOptimizationTaskId(taskId);
+    }, []);
 
     useEffect(() => {
         const savedTaskId = localStorage.getItem('activeOptimizationId');
@@ -1084,42 +1124,9 @@ const Backtester: React.FC = () => {
             });
 
             const taskId = initialRes.task_id;
+            setBacktestTaskId(taskId); // ✅ Track with WebSocket state
+            // No polling needed
 
-            // পোলিং শুরু
-            const interval = setInterval(async () => {
-                try {
-                    const statusRes = await getBacktestStatus(taskId);
-
-                    if (statusRes.status === 'Processing') {
-                        // ✅ এখানে পার্সেন্ট সেট করা হচ্ছে
-                        // statusRes.percent ব্যাকএন্ড থেকে আসছে (0-100)
-                        setProgress(statusRes.percent || 0);
-                    } else if (statusRes.status === 'Completed') {
-                        clearInterval(interval);
-
-                        // ✅ Error Handling for Backend Logic Errors
-                        if (statusRes.result?.status === 'error' || statusRes.result?.error) {
-                            setIsRunning(false);
-                            showToast(`Backtest Failed: ${statusRes.result.message || statusRes.result.error}`, 'error');
-                            return;
-                        }
-
-                        setBacktestResult(statusRes.result); // রেজাল্ট সেট করা
-                        setSingleResult(statusRes.result); // For Chart
-                        setIsRunning(false);
-                        setProgress(100);
-                        setShowResults(true);
-                        showToast('Backtest Completed!', 'success');
-                    } else if (statusRes.status === 'Failed') {
-                        clearInterval(interval);
-                        setIsRunning(false);
-                        showToast(`Error: ${statusRes.error}`, 'error');
-                    }
-                } catch (e) {
-                    clearInterval(interval);
-                    setIsRunning(false);
-                }
-            }, 1000);
 
         } catch (error) {
             console.error(error);
@@ -1200,50 +1207,11 @@ const Backtester: React.FC = () => {
 
             const res = await runBatchBacktest(payload);
             const taskId = res.task_id;
+            setBatchTaskId(taskId); // ✅ Track via WebSocket
             showToast('Batch Analysis Started!', 'success');
 
-            // 2. Poll for Status
-            // 2. Poll for Status
-            // 2. Poll for Status
-            const intervalId = setInterval(async () => {
-                try {
-                    const statusData = await getTaskStatus(taskId);
-                    console.log("Poll Status:", statusData);
+            // No polling
 
-                    // ✅ ফিক্স: ব্যাকএন্ড 'status' বা 'state' যা-ই পাঠাক, দুটোই চেক করা
-                    const currentStatus = statusData.status || statusData.state;
-
-                    if (currentStatus === 'PROGRESS' || currentStatus === 'Processing') {
-                        const percent = statusData.percent || statusData.meta?.percent || 0;
-                        const message = statusData.message || statusData.meta?.status || "Processing...";
-
-                        setBatchProgress(percent);
-                        setBatchStatusMsg(`${message} (${percent}%)`);
-                    }
-
-                    if (currentStatus === 'SUCCESS' || currentStatus === 'Completed') {
-                        clearInterval(intervalId);
-                        setIsBatchRunning(false);
-                        setBatchProgress(100);
-                        setBatchStatusMsg("✅ Batch Test Completed!");
-
-                        const finalResults = statusData.result?.results || statusData.results || [];
-                        setBatchResults(finalResults);
-                        setShowResults(true);
-                        showToast('Batch Analysis Completed!', 'success');
-                    }
-
-                    if (currentStatus === 'FAILURE' || currentStatus === 'Failed') {
-                        clearInterval(intervalId);
-                        setIsBatchRunning(false);
-                        setBatchStatusMsg("❌ Batch Test Failed");
-                        showToast(`Batch Failed: ${statusData.error}`, 'error');
-                    }
-
-                } catch (err) {
-                    console.error("Polling Error:", err);
-                }
-            }, 1000);
 
         } catch (error) {
             console.error(error);

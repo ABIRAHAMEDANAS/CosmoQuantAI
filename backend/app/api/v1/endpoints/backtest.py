@@ -15,8 +15,7 @@ DATA_FEED_DIR = "app/data_feeds"
 
 @router.post("/run")
 def run_backtest(
-    request: schemas.BacktestRequest,
-    current_user: models.User = Depends(deps.get_current_user)
+    request: schemas.BacktestRequest
 ):
     task = run_backtest_task.delay(
         symbol=request.symbol,
@@ -38,8 +37,7 @@ def run_backtest(
 
 @router.post("/batch")
 def run_batch_backtest(
-    request: schemas.BatchBacktestRequest,
-    current_user: models.User = Depends(deps.get_current_user)
+    request: schemas.BatchBacktestRequest
 ):
     task = run_batch_backtest_task.delay(
         symbol=request.symbol,
@@ -55,10 +53,9 @@ def run_batch_backtest(
 # Keeping the redundant synchronous-looking endpoint name from main.py if needed, but mapped to batch task
 @router.post("/batch-run")
 def run_batch_backtest_alias(
-    request: schemas.BatchBacktestRequest,
-    current_user: models.User = Depends(deps.get_current_user)
+    request: schemas.BatchBacktestRequest
 ):
-    return run_batch_backtest(request, current_user)
+    return run_batch_backtest(request)
 
 @router.get("/status/{task_id}")
 def get_backtest_status(task_id: str):
@@ -87,8 +84,7 @@ def get_backtest_status(task_id: str):
 
 @router.post("/optimize")
 def run_optimization(
-    request: schemas.OptimizationRequest,
-    current_user: models.User = Depends(deps.get_current_user)
+    request: schemas.OptimizationRequest
 ):
     params_dict = {}
     for k, v in request.params.items():
@@ -112,7 +108,7 @@ def run_optimization(
     return {"task_id": task.id, "status": "Processing"}
 
 @router.post("/revoke/{task_id}")
-def revoke_task(task_id: str, current_user: models.User = Depends(deps.get_current_user)):
+def revoke_task(task_id: str):
     celery_app.control.revoke(task_id, terminate=True)
     try:
         r = utils.get_redis_client()

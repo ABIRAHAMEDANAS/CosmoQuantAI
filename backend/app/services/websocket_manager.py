@@ -42,4 +42,18 @@ class ConnectionManager:
                 except Exception:
                     self.disconnect(connection, symbol)
 
+    # ✅ Unified Broadcast Method
+    async def broadcast_status(self, task_type: str, task_id: str, status: str, progress: int, data: dict = None):
+        """Unified method to broadcast task status to 'backtest' channel"""
+        message = {
+            "type": task_type,      # 'BACKTEST', 'DOWNLOAD', 'OPTIMIZE'
+            "task_id": task_id,
+            "status": status,       # 'processing', 'completed', 'failed'
+            "progress": progress,
+            "payload": data         # Result data (optional)
+        }
+        
+        # Broadcast to 'backtest' channel which frontend will listen to
+        await self.broadcast(message, "backtest")
+
 manager = ConnectionManager()
