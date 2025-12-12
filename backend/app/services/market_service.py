@@ -205,41 +205,59 @@ class MarketService:
             if hasattr(ccxt, exchange_id):
                 exchange_class = getattr(ccxt, exchange_id)
                 
-                # কনফিগারেশন
+                # ১. বেসিক কনফিগারেশন
                 config = {
                     'enableRateLimit': True,
-                    'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    'userAgent': 'CosmoQuant/1.0',  # User Agent সরল করা হলো
                 }
 
-                # ঐচ্ছিক: .env থেকে API Key চেক করা (যদি থাকে)
+                # ২. .env থেকে API Key চেক করা
                 env_api_key = os.getenv(f"{exchange_id.upper()}_API_KEY")
                 env_secret = os.getenv(f"{exchange_id.upper()}_SECRET")
+                
                 if env_api_key and env_secret:
                     config['apiKey'] = env_api_key
                     config['secret'] = env_secret
-                    
-                    # ✅ Fix: Alpaca Paper Trading support
-                    if exchange_id == 'alpaca' and env_api_key.startswith('PK'):
-                        config['options'] = {'defaultType': 'paper'}  # Use paper trading endpoint
 
-                # এক্সচেঞ্জ ইনিশিয়ালাইজ করার চেষ্টা
+                # ৩. এক্সচেঞ্জ ইনিশিয়ালাইজ করা
                 try:
                     temp_exchange = exchange_class(config)
+                    
+                    # ✅ ULTIMATE FIX: সরাসরি অবজেক্টের URL প্রপার্টি মডিফাই করা
+                    if exchange_id == 'alpaca' and env_api_key and env_api_key.startswith('PK'):
+                        print(f"⚠️ FORCE SWITCH: Switching Alpaca to Paper Trading Mode...")
+                        
+                        # স্যান্ডবক্স মোড সেট করার চেষ্টা
+                        temp_exchange.set_sandbox_mode(True)
+                        
+                        # ডাবল চেক: যদি set_sandbox_mode কাজ না করে, তবে ম্যানুয়ালি URL বসানো
+                        if 'test' in temp_exchange.urls:
+                            # টেস্ট URL গুলো মেইন API স্লটে কপি করা
+                            temp_exchange.urls['api'] = temp_exchange.urls['test'].copy()
+                        
+                        # ডাটা URL এবং ট্রেডার URL ম্যানুয়ালি নিশ্চিত করা
+                        # কারণ অনেক সময় স্যান্ডবক্স ডাটা URL (data.sandbox...) কাজ করে না
+                        if isinstance(temp_exchange.urls['api'], dict):
+                            temp_exchange.urls['api']['market'] = 'https://data.alpaca.markets'
+                            temp_exchange.urls['api']['trader'] = 'https://paper-api.alpaca.markets'
+                            
+                        print(f"ℹ️ Active Alpaca URLs: {temp_exchange.urls['api']}")
+
                 except Exception as e:
-                    # Alpaca বা অন্য এক্সচেঞ্জ ক্রেডেনশিয়াল ছাড়া ইনিশিলাইজ না হলে এখানে থামবে
-                    print(f"Skipping {exchange_id}: Init failed (Needs keys?). Error: {e}")
+                    print(f"Skipping {exchange_id}: Init failed. Error: {e}")
                     return []
 
-                # মার্কেট লোড করার চেষ্টা
+                # ৪. মার্কেট লোড করার চেষ্টা
                 try:
                     markets = await temp_exchange.load_markets()
                     symbols = list(markets.keys())
                     
-                    # সফল হলে ক্যাশে সেভ করুন
                     self._markets_cache[exchange_id] = symbols
+                    print(f"✅ Successfully loaded {len(symbols)} markets for {exchange_id}")
                     return symbols
                 except Exception as e:
-                    print(f"Could not load markets for {exchange_id}: {e}")
+                    print(f"❌ Could not load markets for {exchange_id}: {e}")
+                    # এরর এর বিস্তারিত প্রিন্ট করা
                     return []
                 finally:
                     if temp_exchange:

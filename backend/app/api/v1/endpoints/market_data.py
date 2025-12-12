@@ -25,23 +25,18 @@ def get_exchanges():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ✅ 2. নির্দিষ্ট এক্সচেঞ্জের সব পেয়ার (Backtester এর জন্য)
+# ✅ 2. নির্দিষ্ট এক্সচেঞ্জের সব পেয়ার (আপডেটেড কোড)
+# মনে রাখবেন: এখানে 'async' যোগ করা হয়েছে কারণ market_service.get_exchange_markets একটি async ফাংশন
 @router.get("/markets/{exchange_id}")
-def get_markets(exchange_id: str):
+async def get_markets(exchange_id: str):
     try:
-        if exchange_id not in ccxt.exchanges:
-            raise HTTPException(status_code=404, detail="Exchange not found")
-
-        exchange_class = getattr(ccxt, exchange_id)
-        exchange = exchange_class()
+        # সরাসরি ccxt ব্যবহার না করে market_service ব্যবহার করুন
+        # কারণ market_service.py ফাইলে ইতিমধ্যে API Key লোড করার লজিক লেখা আছে
+        symbols = await market_service.get_exchange_markets(exchange_id)
         
-        try:
-            markets = exchange.load_markets()
-        except Exception as load_error:
-            print(f"Error loading markets for {exchange_id}: {load_error}")
-            raise HTTPException(status_code=404, detail=f"Failed to load markets: {str(load_error)}")
+        if not symbols:
+            raise HTTPException(status_code=404, detail=f"Markets not found for {exchange_id}. Check API Keys in .env")
 
-        symbols = [symbol for symbol in markets.keys() if markets[symbol].get('active', True)]
         return symbols
 
     except HTTPException as he:
