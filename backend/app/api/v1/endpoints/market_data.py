@@ -46,8 +46,8 @@ async def get_markets(exchange_id: str):
 
 # ✅ 3. নির্দিষ্ট এক্সচেঞ্জের সব পেয়ার (BotLab এর জন্য)
 @router.get("/pairs/{exchange_id}")
-def get_exchange_pairs(exchange_id: str):
-    return get_markets(exchange_id)
+async def get_exchange_pairs(exchange_id: str):
+    return await get_markets(exchange_id)
 
 # ✅ 4. ডাটা সিঙ্ক
 @router.post("/sync")
