@@ -62,6 +62,7 @@ class ApiKeyResponse(BaseModel):
 class BacktestRequest(BaseModel):
     symbol: str
     timeframe: str
+    secondary_timeframe: Optional[str] = None
     strategy: str
     initial_cash: float = 10000.0
     start_date: Optional[str] = None  # Format: YYYY-MM-DD
@@ -71,6 +72,11 @@ class BacktestRequest(BaseModel):
     # নতুন ফিল্ডস (Slippage & Commission)
     commission: float = 0.001
     slippage: float = 0.0
+
+    # Risk Management Fields (New)
+    stop_loss: Optional[float] = 0.0      # % ভিত্তিক (যেমন 2.0 মানে 2%)
+    take_profit: Optional[float] = 0.0    # % ভিত্তিক (যেমন 5.0 মানে 5%)
+    trailing_stop: Optional[float] = 0.0  # % ভিত্তিক
 
 class BatchBacktestRequest(BaseModel):
     symbol: str

@@ -24,7 +24,7 @@ import "react-datepicker/dist/react-datepicker.css";
 import MonthlyReturnsHeatmap from '@/components/features/backtest/MonthlyReturnsHeatmap';
 import ParameterHeatmap from '@/components/features/backtest/ParameterHeatmap';
 
-import { Activity, Layers, PlayIcon, CodeIcon, SaveIcon, UploadCloud, Download, X, AlertCircle, Settings, Info, LayoutGrid, List, FileText, BarChart2, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Activity, Layers, PlayIcon, CodeIcon, SaveIcon, UploadCloud, Download, X, AlertCircle, Settings, Info, LayoutGrid, List, FileText, BarChart2, RefreshCw, CheckCircle2, Shield, Target, TrendingUp } from 'lucide-react';
 
 // --- Constants ---
 // ব্যাকএন্ডের সাপোর্টেড স্ট্যান্ডার্ড স্ট্র্যাটেজিগুলো
@@ -220,7 +220,11 @@ const Backtester: React.FC = () => {
         setParams: setContextParams,
         singleResult: contextResult,
         commission, setCommission,
-        slippage, setSlippage
+        slippage, setSlippage,
+        secondaryTimeframe, setSecondaryTimeframe,
+        stopLoss, setStopLoss,
+        takeProfit, setTakeProfit,
+        trailingStop, setTrailingStop
     } = useBacktest();
 
     // --- Tab State (NEW) ---
@@ -1069,7 +1073,14 @@ const Backtester: React.FC = () => {
                 start_date: startDate,
                 end_date: endDate,
                 params: params, // আপনার প্যারামস স্টেট এখানে দিন
-                custom_data_file: payloadFile // ✅ ফাইল নাম পাঠানো হচ্ছে
+                custom_data_file: payloadFile, // ✅ ফাইল নাম পাঠানো হচ্ছে
+
+                // ✅ Risk Management & Cost Parameters
+                commission: commission,
+                slippage: slippage,
+                stop_loss: stopLoss,
+                take_profit: takeProfit,
+                trailing_stop: trailingStop
             });
 
             const taskId = initialRes.task_id;
@@ -1606,6 +1617,24 @@ const Backtester: React.FC = () => {
                                         {TIMEFRAME_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
                                     </select>
                                 </div>
+
+                                {/* ✅ Secondary Timeframe Selector */}
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-500 mb-1">
+                                        Secondary TF (Optional)
+                                        <span className="text-[10px] text-brand-primary ml-1">(Trend)</span>
+                                    </label>
+                                    <select
+                                        className={inputBaseClasses}
+                                        value={secondaryTimeframe}
+                                        onChange={(e) => setSecondaryTimeframe(e.target.value)}
+                                    >
+                                        <option value="">None</option>
+                                        {TIMEFRAME_OPTIONS.map(t => (
+                                            <option key={t} value={t}>{t}</option>
+                                        ))}
+                                    </select>
+                                </div>
                             </div>
 
                             {/* অন্যান্য প্যারামিটার */}
@@ -1638,52 +1667,102 @@ const Backtester: React.FC = () => {
                             </div>
 
                             {/* ✅ Execution Realism UI */}
-                            <div className="mt-6 pt-4 border-t border-brand-border-light dark:border-brand-border-dark">
-                                <div className="flex items-center gap-2 mb-4">
-                                    <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                                        Execution Realism (Fees & Slippage)
-                                    </h3>
-                                </div>
+                            {/* ✅ Execution Realism & Risk Management */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-6 pt-4 border-t border-brand-border-light dark:border-brand-border-dark">
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    {/* Commission Input */}
-                                    <div className="relative">
-                                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                                            Trading Fee (Commission)
-                                        </label>
-                                        <div className="flex items-center">
-                                            <input
-                                                type="number"
-                                                step="0.0001"
-                                                value={commission}
-                                                onChange={(e) => setCommission(parseFloat(e.target.value))}
-                                                className="w-full bg-white dark:bg-brand-dark/50 border border-brand-border-light dark:border-brand-border-dark rounded-l-md p-2 text-sm text-slate-900 dark:text-white focus:ring-brand-primary focus:border-brand-primary"
-                                            />
-                                            <span className="bg-gray-100 dark:bg-gray-800 border border-l-0 border-brand-border-light dark:border-brand-border-dark rounded-r-md px-3 py-2 text-xs text-gray-500">
-                                                {(commission * 100).toFixed(2)}%
-                                            </span>
-                                        </div>
+                                {/* Left Side: Execution Realism */}
+                                <div>
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                                            Execution Settings
+                                        </h3>
                                     </div>
-
-                                    {/* Slippage Input */}
-                                    <div className="relative">
-                                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                                            Slippage Model
-                                        </label>
-                                        <div className="flex items-center">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {/* Commission */}
+                                        <div>
+                                            <label className="block text-xs font-medium text-gray-500 mb-1">Commission (%)</label>
                                             <input
                                                 type="number"
-                                                step="0.0001"
-                                                value={slippage}
-                                                onChange={(e) => setSlippage(parseFloat(e.target.value))}
-                                                className="w-full bg-white dark:bg-brand-dark/50 border border-brand-border-light dark:border-brand-border-dark rounded-l-md p-2 text-sm text-slate-900 dark:text-white focus:ring-brand-primary focus:border-brand-primary"
+                                                step="0.01"
+                                                value={commission * 100} // ডিসপ্লে করার সময় ১০০ দিয়ে গুণ
+                                                onChange={(e) => setCommission(parseFloat(e.target.value) / 100)}
+                                                className={inputBaseClasses}
                                             />
-                                            <span className="bg-gray-100 dark:bg-gray-800 border border-l-0 border-brand-border-light dark:border-brand-border-dark rounded-r-md px-3 py-2 text-xs text-gray-500">
-                                                {(slippage * 100).toFixed(2)}%
-                                            </span>
+                                        </div>
+                                        {/* Slippage */}
+                                        <div>
+                                            <label className="block text-xs font-medium text-gray-500 mb-1">Slippage (%)</label>
+                                            <input
+                                                type="number"
+                                                step="0.01"
+                                                value={slippage * 100}
+                                                onChange={(e) => setSlippage(parseFloat(e.target.value) / 100)}
+                                                className={inputBaseClasses}
+                                            />
                                         </div>
                                     </div>
                                 </div>
+
+                                {/* ✅ Right Side: Risk Management (নতুন অংশ) */}
+                                <div className="bg-red-50 dark:bg-red-900/10 p-4 rounded-lg border border-red-100 dark:border-red-900/30">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <Shield size={16} className="text-red-500" />
+                                        <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                                            Risk Management (Global)
+                                        </h3>
+                                    </div>
+
+                                    <div className="grid grid-cols-3 gap-4">
+                                        {/* Stop Loss */}
+                                        <div>
+                                            <label className="block text-xs font-medium text-red-600 dark:text-red-400 mb-1 flex items-center gap-1">
+                                                <Shield size={10} /> Stop Loss %
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="0.1"
+                                                placeholder="0.0"
+                                                value={stopLoss === 0 ? '' : stopLoss}
+                                                onChange={(e) => setStopLoss(parseFloat(e.target.value) || 0)}
+                                                className="w-full bg-white dark:bg-brand-dark border border-red-200 dark:border-red-800/50 rounded-md p-2 text-sm focus:ring-red-500 focus:border-red-500"
+                                            />
+                                        </div>
+
+                                        {/* Take Profit */}
+                                        <div>
+                                            <label className="block text-xs font-medium text-green-600 dark:text-green-400 mb-1 flex items-center gap-1">
+                                                <Target size={10} /> Take Profit %
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="0.1"
+                                                placeholder="0.0"
+                                                value={takeProfit === 0 ? '' : takeProfit}
+                                                onChange={(e) => setTakeProfit(parseFloat(e.target.value) || 0)}
+                                                className="w-full bg-white dark:bg-brand-dark border border-green-200 dark:border-green-800/50 rounded-md p-2 text-sm focus:ring-green-500 focus:border-green-500"
+                                            />
+                                        </div>
+
+                                        {/* Trailing Stop */}
+                                        <div>
+                                            <label className="block text-xs font-medium text-blue-600 dark:text-blue-400 mb-1 flex items-center gap-1">
+                                                <TrendingUp size={10} /> Trailing %
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="0.1"
+                                                placeholder="0.0"
+                                                value={trailingStop === 0 ? '' : trailingStop}
+                                                onChange={(e) => setTrailingStop(parseFloat(e.target.value) || 0)}
+                                                className="w-full bg-white dark:bg-brand-dark border border-blue-200 dark:border-blue-800/50 rounded-md p-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                                            />
+                                        </div>
+                                    </div>
+                                    <p className="text-[10px] text-gray-500 mt-2 italic">
+                                        *Values set here will override strategy defaults. Set to 0 to disable.
+                                    </p>
+                                </div>
+
                             </div>
 
                             {activeTab === 'single' && renderSingleParams()}

@@ -1,4 +1,5 @@
 import inspect
+import math
 import backtrader as bt
 import pandas as pd
 import quantstats as qs
@@ -110,8 +111,11 @@ class FractionalPercentSizer(bt.Sizer):
 
 class BacktestEngine:
     
-    def run(self, db: Session, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, start_date: str = None, end_date: str = None, custom_data_file: str = None, progress_callback=None, 
-            commission: float = 0.001, slippage: float = 0.0):
+    def run(self, db: Session, symbol: str, timeframe: str, strategy_name: str, initial_cash: float, params: dict, 
+            start_date: str = None, end_date: str = None, custom_data_file: str = None, progress_callback=None, 
+            commission: float = 0.001, slippage: float = 0.0, 
+            secondary_timeframe: str = None,  # ✅ Secondary Timeframe (Trend)
+            stop_loss: float = 0.0, take_profit: float = 0.0, trailing_stop: float = 0.0): # ✅ Risk Management
         
         resample_compression = 1
         base_timeframe = timeframe
@@ -186,9 +190,15 @@ class BacktestEngine:
                 try: clean_params[k] = float(v)
                 except: clean_params[k] = v
 
+        # ✅ Risk Management Params Injection
+        if stop_loss > 0: clean_params['stop_loss'] = stop_loss
+        if take_profit > 0: clean_params['take_profit'] = take_profit
+        if trailing_stop > 0: clean_params['trailing_stop'] = trailing_stop
+
         cerebro = bt.Cerebro()
         data_feed = bt.feeds.PandasData(dataname=df)
         
+        # Add Primary Data
         if resample_compression > 1:
             tf_mapping = {
                 'm': bt.TimeFrame.Minutes,
@@ -200,6 +210,20 @@ class BacktestEngine:
             cerebro.resampledata(data_feed, timeframe=bt_timeframe, compression=resample_compression)
         else:
             cerebro.adddata(data_feed)
+
+        # ✅ Secondary Timeframe Logic
+        if secondary_timeframe:
+            tf_map = {
+                "1m": (bt.TimeFrame.Minutes, 1), "5m": (bt.TimeFrame.Minutes, 5),
+                "15m": (bt.TimeFrame.Minutes, 15), "30m": (bt.TimeFrame.Minutes, 30),
+                "1h": (bt.TimeFrame.Minutes, 60), "4h": (bt.TimeFrame.Minutes, 240),
+                "1d": (bt.TimeFrame.Days, 1), "1w": (bt.TimeFrame.Weeks, 1)
+            }
+            if secondary_timeframe in tf_map:
+                bt_tf, compression = tf_map[secondary_timeframe]
+                cerebro.resampledata(data_feed, timeframe=bt_tf, compression=compression, name=f"TF_{secondary_timeframe}")
+            else:
+                print(f"⚠️ Warning: Unsupported secondary timeframe {secondary_timeframe}")
 
         if progress_callback:
             total_candles = len(df)
@@ -233,8 +257,13 @@ class BacktestEngine:
         cerebro.addanalyzer(bt.analyzers.Transactions, _name="transactions")
 
         start_value = cerebro.broker.getvalue()
-        results = cerebro.run() 
-        first_strat = results[0]
+        try:
+            results = cerebro.run() 
+            first_strat = results[0]
+        except Exception as e:
+            print(f"❌ Backtest Runtime Error: {e}")
+            return {"error": f"Backtest execution failed: {str(e)}"}
+
         end_value = cerebro.broker.getvalue()
 
         qs_metrics = self._calculate_metrics(first_strat, start_value, end_value)
@@ -569,27 +598,45 @@ class BacktestEngine:
 
     # ... (বাকি মেথডগুলো অপরিবর্তিত রাখুন) ...
     def _load_strategy_class(self, strategy_name):
+        # ১. ম্যাপ থেকে চেক করা (স্ট্যান্ডার্ড স্ট্র্যাটেজি)
         strategy_class = STRATEGY_MAP.get(strategy_name)
+        
+        # ২. ফাইল থেকে লোড করা (কাস্টম স্ট্র্যাটেজি)
         if not strategy_class:
             try:
                 current_file_dir = os.path.dirname(os.path.abspath(__file__))
                 custom_strategies_dir = os.path.join(current_file_dir, '..', 'strategies', 'custom')
                 custom_strategies_dir = os.path.normpath(custom_strategies_dir)
+                
                 file_name = f"{strategy_name}.py" if not strategy_name.endswith(".py") else strategy_name
                 file_path = os.path.join(custom_strategies_dir, file_name)
+                
                 if os.path.exists(file_path):
                     module_name = file_name.replace('.py', '')
-                    if module_name in sys.modules: del sys.modules[module_name]
+                    
+                    # পুরোনো মডিউল ক্যাশ থেকে সরানো (রিলোড নিশ্চিত করতে)
+                    if module_name in sys.modules: 
+                        del sys.modules[module_name]
+                        
                     spec = importlib.util.spec_from_file_location(module_name, file_path)
                     if spec and spec.loader:
                         module = importlib.util.module_from_spec(spec)
                         sys.modules[module_name] = module
                         spec.loader.exec_module(module)
-                    else: return None
+                    else: 
+                        return None
+                    
+                    # ✅ ফিক্স: শুধু এই মডিউলে ডিফাইন করা ক্লাসটিই রিটার্ন করবে
+                    # এটি ইম্পোর্ট করা অন্য ক্লাস (যেমন BaseStrategy) ইগনোর করবে
                     for name, obj in inspect.getmembers(module):
                         if inspect.isclass(obj) and issubclass(obj, bt.Strategy) and obj is not bt.Strategy:
-                            return obj
-            except Exception as e: print(f"❌ Exception loading custom strategy '{strategy_name}': {e}")
+                            # 🔴 গুরুত্বপূর্ণ চেক: ক্লাসটি কি এই ফাইলেই ডিফাইন করা হয়েছে?
+                            if obj.__module__ == module_name:
+                                return obj
+                                
+            except Exception as e: 
+                print(f"❌ Exception loading custom strategy '{strategy_name}': {e}")
+                
         return strategy_class
 
     def _filter_params(self, strategy_class, params):
@@ -607,18 +654,26 @@ class BacktestEngine:
         return valid_params
 
     def _calculate_metrics(self, first_strat, start_value, end_value):
-        qs_metrics = {"sharpe": 0, "sortino": 0, "max_drawdown": 0, "win_rate": 0, "profit_factor": 0, "cagr": 0, "volatility": 0, "calmar": 0, "recovery_factor": 0, "expected_return": 0}
+        qs_metrics = {
+            "sharpe": 0, "sortino": 0, "max_drawdown": 0, "win_rate": 0, 
+            "profit_factor": 0, "cagr": 0, "volatility": 0, "calmar": 0, 
+            "recovery_factor": 0, "expected_return": 0
+        }
         heatmap_data = []
         underwater_data = []
         histogram_data = []
+        
         try:
             portfolio_stats = first_strat.analyzers.getbyname('pyfolio')
             returns, positions, transactions, gross_lev = portfolio_stats.get_pf_items()
             returns.index = returns.index.tz_localize(None)
+            
             sharpe_val = 0
             if not returns.empty and len(returns) > 5:
                 try: sharpe_val = qs.stats.sharpe(returns)
                 except: sharpe_val = 0
+            
+            # --- মেট্রিক্স ক্যালকুলেশন ---
             qs_metrics = {
                 "sharpe": sharpe_val,
                 "sortino": qs.stats.sortino(returns) if not returns.empty else 0,
@@ -631,19 +686,52 @@ class BacktestEngine:
                 "recovery_factor": qs.stats.recovery_factor(returns) if not returns.empty else 0,
                 "expected_return": qs.stats.expected_return(returns) * 100 if not returns.empty else 0
             }
+
+            # --- Heatmap Data ---
             if not returns.empty:
                 monthly_ret_series = returns.resample('ME').apply(lambda x: (1 + x).prod() - 1)
                 for timestamp, value in monthly_ret_series.items():
-                    if pd.notna(value): heatmap_data.append({"year": timestamp.year, "month": timestamp.month, "value": round(value * 100, 2)})
+                    val = value * 100
+                    # NaN বা Inf চেক
+                    if isinstance(val, (int, float)) and not (math.isnan(val) or math.isinf(val)):
+                        heatmap_data.append({"year": timestamp.year, "month": timestamp.month, "value": round(val, 2)})
+            
+            # --- Underwater Data ---
             drawdown_series = qs.stats.to_drawdown_series(returns)
-            underwater_data = [{"time": int(t.timestamp()), "value": round(v * 100, 2)} for t, v in drawdown_series.items()]
+            for t, v in drawdown_series.items():
+                val = v * 100
+                if isinstance(val, (int, float)) and not (math.isnan(val) or math.isinf(val)):
+                    underwater_data.append({"time": int(t.timestamp()), "value": round(val, 2)})
+            
+            # --- Histogram Data ---
             clean_returns = returns.dropna()
             if not clean_returns.empty:
                 hist_values, bin_edges = np.histogram(clean_returns * 100, bins=20)
                 for i in range(len(hist_values)):
-                    if hist_values[i] > 0: histogram_data.append({"range": f"{round(bin_edges[i], 1)}% to {round(bin_edges[i+1], 1)}%", "frequency": int(hist_values[i])})
-        except Exception as e: pass
-        return {"metrics": {k: (round(v, 2) if isinstance(v, (int, float)) else 0) for k, v in qs_metrics.items()}, "heatmap": heatmap_data, "underwater": underwater_data, "histogram": histogram_data}
+                    if hist_values[i] > 0: 
+                        histogram_data.append({"range": f"{round(bin_edges[i], 1)}% to {round(bin_edges[i+1], 1)}%", "frequency": int(hist_values[i])})
+                        
+        except Exception as e: 
+            print(f"⚠️ Metrics Calculation Error: {e}")
+            pass
+
+        # ✅ ফাইনাল স্যানিটাইজেশন (NaN/Inf কে 0 তে কনভার্ট করা)
+        sanitized_metrics = {}
+        for k, v in qs_metrics.items():
+            if isinstance(v, (int, float)):
+                if math.isnan(v) or math.isinf(v):
+                    sanitized_metrics[k] = 0.0
+                else:
+                    sanitized_metrics[k] = round(v, 2)
+            else:
+                sanitized_metrics[k] = 0.0
+
+        return {
+            "metrics": sanitized_metrics, 
+            "heatmap": heatmap_data, 
+            "underwater": underwater_data, 
+            "histogram": histogram_data
+        }
 
     # Helper method already added in previous step
     def _format_trade_analysis(self, strategy):

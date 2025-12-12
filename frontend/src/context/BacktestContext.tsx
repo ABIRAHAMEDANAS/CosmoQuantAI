@@ -29,6 +29,15 @@ interface BacktestContextType {
     setCommission: (c: number) => void;
     slippage: number;
     setSlippage: (s: number) => void;
+    secondaryTimeframe: string;
+    setSecondaryTimeframe: (t: string) => void;
+
+    stopLoss: number;
+    setStopLoss: (v: number) => void;
+    takeProfit: number;
+    setTakeProfit: (v: number) => void;
+    trailingStop: number;
+    setTrailingStop: (v: number) => void;
 
     strategies: string[];
     setStrategies: React.Dispatch<React.SetStateAction<string[]>>;
@@ -73,6 +82,11 @@ export const BacktestProvider: React.FC<{ children: ReactNode }> = ({ children }
     // ✅ নতুন স্টেট (ডিফল্ট: 0.1% কমিশন, 0% স্লিপেজ)
     const [commission, setCommission] = useState(0.001);
     const [slippage, setSlippage] = useState(0.0);
+    const [secondaryTimeframe, setSecondaryTimeframe] = useState('');
+
+    const [stopLoss, setStopLoss] = useState(0.0);
+    const [takeProfit, setTakeProfit] = useState(0.0);
+    const [trailingStop, setTrailingStop] = useState(0.0);
 
     const [singleResult, setSingleResult] = useState<BacktestResult | null>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -118,7 +132,11 @@ export const BacktestProvider: React.FC<{ children: ReactNode }> = ({ children }
 
                 // ✅ নতুন: API তে পাঠানো হচ্ছে
                 commission: commission,
-                slippage: slippage
+                slippage: slippage,
+                secondary_timeframe: options?.secondary_timeframe || secondaryTimeframe || undefined,
+                stop_loss: stopLoss,
+                take_profit: takeProfit,
+                trailing_stop: trailingStop
             });
 
             const taskId = initialResponse.task_id;
@@ -212,6 +230,10 @@ export const BacktestProvider: React.FC<{ children: ReactNode }> = ({ children }
             // ✅ নতুন ভ্যালু এক্সপোর্ট
             commission, setCommission,
             slippage, setSlippage,
+            secondaryTimeframe, setSecondaryTimeframe,
+            stopLoss, setStopLoss,
+            takeProfit, setTakeProfit,
+            trailingStop, setTrailingStop,
             // Aliases
             results: singleResult,
             isRunning: isLoading,

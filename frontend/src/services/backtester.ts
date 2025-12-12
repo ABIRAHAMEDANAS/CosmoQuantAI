@@ -3,6 +3,7 @@ import apiClient from './client';
 export interface BacktestRequest {
     symbol: string;
     timeframe: string;
+    secondary_timeframe?: string;
     strategy: string;
     initial_cash: number;
     start_date?: string;
@@ -11,6 +12,9 @@ export interface BacktestRequest {
     custom_data_file?: string | null;
     commission?: number;
     slippage?: number;
+    stop_loss?: number;
+    take_profit?: number;
+    trailing_stop?: number;
 }
 
 export interface OptimizationRequest {

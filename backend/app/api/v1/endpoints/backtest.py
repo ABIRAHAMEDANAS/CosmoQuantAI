@@ -28,7 +28,11 @@ def run_backtest(
         end_date=request.end_date,
         custom_data_file=request.custom_data_file,
         commission=request.commission,
-        slippage=request.slippage
+        slippage=request.slippage,
+        secondary_timeframe=request.secondary_timeframe,
+        stop_loss=request.stop_loss,
+        take_profit=request.take_profit,
+        trailing_stop=request.trailing_stop
     )
     return {"task_id": task.id, "status": "Processing"}
 
